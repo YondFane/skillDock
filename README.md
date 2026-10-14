@@ -10,6 +10,7 @@
 - **安全写入：**查看差异后确认；使用整个资源和元数据的哈希检测外部修改；写入后回读验证。
 - **备份恢复：**每次变更保存完整的操作前副本；可预览恢复编辑、删除，也可撤销创建。
 - **项目与目录：**登记、移除项目；自定义 Claude 配置目录、Codex 配置目录和 Codex 全局技能目录。
+- **外观与字体：**设置中切换黑色、白色主题；选择系统、无衬线、宋体、等宽或本机自定义字体。默认字号 16px，可选 14–22px，界面与编辑器同步调整，重启后保留。
 - **持久化：**SQLite 保存索引、项目、配置与操作日志；实际文件保存在磁盘；启动时检查中断操作。
 
 ## 开发启动
@@ -24,7 +25,7 @@ npm ci
 npm run tauri dev
 ```
 
-`npm run dev` 只启动 Vite。浏览器没有 Tauri 本地文件权限，会显示桌面启动提示；不会使用 localStorage 模拟持久化。
+`npm run dev` 只启动 Vite。浏览器没有 Tauri 本地文件权限，会显示桌面启动提示；不会使用 localStorage 模拟资源存储。外观偏好保存在本机 WebView 存储中，与资源文件和 SQLite 索引分开。
 
 ## 构建与检查
 
@@ -48,12 +49,12 @@ macOS 平台配置生成 `.app` 和 `.dmg`，Windows 平台配置生成 NSIS `.e
 后续发布新版本时，先提交功能改动，再同步版本并推送标签：
 
 ```bash
-npm run release:version -- 0.1.4
+npm run release:version -- 0.1.5
 git add package.json package-lock.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json
-git commit -m "chore: release v0.1.4"
+git commit -m "chore: release v0.1.5"
 git push origin main
-git tag -a v0.1.4 -m "SkillDock v0.1.4"
-git push origin v0.1.4
+git tag -a v0.1.5 -m "SkillDock v0.1.5"
+git push origin v0.1.5
 ```
 
 `release:version` 同步前端、Tauri、Rust 与锁文件版本，界面显示的版本也会随之更新。发布前可编辑 `docs/testing-release-notes.md` 更新版本说明，并将其一并提交。

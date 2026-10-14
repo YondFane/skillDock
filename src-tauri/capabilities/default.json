@@ -3,5 +3,5 @@
   "identifier": "main-capability",
   "description": "SkillDock 主窗口使用文件对话框与签名更新；资源文件写入经业务命令执行。",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "updater:default", "process:allow-restart"]
+  "permissions": ["core:default", "core:window:allow-set-theme", "dialog:allow-open", "updater:default", "process:allow-restart"]
 }

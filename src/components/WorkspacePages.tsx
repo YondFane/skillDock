@@ -5,6 +5,7 @@ import type { Operation, Project, Settings } from '../lib/types';
 import { actionLabel, errorMessage, formatDate, statusLabel } from '../lib/types';
 import { version } from '../../package.json';
 import { UpdatePanel } from './UpdatePanel';
+import { AppearancePanel } from './AppearancePanel';
 
 export function ProjectsPage({ projects, busy, onAdd, onRemove, onOpen, onError }: {
   projects: Project[]; busy: boolean; onAdd: (path: string) => void; onRemove: (id: string) => void;
@@ -67,6 +68,7 @@ export function SettingsPage({ settings, dataDir, busy, onSave, onError, onUpdat
   return <>
     <header className="page-heading"><div><span className="eyebrow">APPLICATION SETTINGS</span><h1>设置</h1><p>让 SkillDock 找到你正在使用的工具配置。</p></div><span className="quiet-pill">v{version}</span></header>
     <div className="page-content settings-content">
+      <AppearancePanel disabled={busy} />
       <section className="settings-card"><div className="section-heading"><h3>工具目录</h3><p>支持标准用户目录与自定义位置；保存后会重新扫描。</p></div>
         {fields.map((field) => <label className="field" key={field.key}>{field.title}
           <div className="path-picker"><input value={draft[field.key]} onChange={(event) => setDraft((current) => ({ ...current, [field.key]: event.target.value }))} disabled={busy} /><button className="button secondary" onClick={() => void browse(field.key)} disabled={busy}><FolderOpen size={15} /> 浏览</button></div><small>{field.hint}</small>

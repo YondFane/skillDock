@@ -16,6 +16,7 @@ import { ResourceEditor } from './components/ResourceEditor';
 import { Modal } from './components/Modal';
 import { HistoryPage, ProjectsPage, SettingsPage } from './components/WorkspacePages';
 import { version } from '../package.json';
+import { AppearanceProvider } from './lib/appearance';
 
 const navigation = [
   { id: 'library' as Page, label: '资源库', icon: Layers2 },
@@ -25,6 +26,10 @@ const navigation = [
 ];
 
 export default function App() {
+  return <AppearanceProvider><Workspace /></AppearanceProvider>;
+}
+
+function Workspace() {
   const [page, setPage] = useState<Page>('library');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);

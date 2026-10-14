@@ -49,12 +49,12 @@ macOS 平台配置生成 `.app` 和 `.dmg`，Windows 平台配置生成 NSIS `.e
 后续发布新版本时，先提交功能改动，再同步版本并推送标签：
 
 ```bash
-npm run release:version -- 0.1.6
+npm run release:version -- 0.1.7
 git add package.json package-lock.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json
-git commit -m "chore: release v0.1.6"
+git commit -m "chore: release v0.1.7"
 git push origin main
-git tag -a v0.1.6 -m "SkillDock v0.1.6"
-git push origin v0.1.6
+git tag -a v0.1.7 -m "SkillDock v0.1.7"
+git push origin v0.1.7
 ```
 
 `release:version` 同步前端、Tauri、Rust 与锁文件版本，界面显示的版本也会随之更新。发布前可编辑 `docs/testing-release-notes.md` 更新版本说明，并将其一并提交。

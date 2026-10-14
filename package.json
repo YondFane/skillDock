@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
+    "build:windows": "tauri build --target x86_64-pc-windows-msvc -- --locked",
+    "build:macos": "tauri build --target universal-apple-darwin -- --locked",
     "test": "vitest run",
     "test:rust": "cargo test -p skilldock-core",
     "check:rust": "cargo clippy --workspace --all-targets -- -D warnings"

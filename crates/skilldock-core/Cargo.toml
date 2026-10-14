@@ -1,0 +1,19 @@
+[package]
+name = "skilldock-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+rusqlite = { version = "0.40", features = ["bundled"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+dirs = "6"
+walkdir = "2"
+tempfile = "3"
+
+[dev-dependencies]
+tempfile = "3"

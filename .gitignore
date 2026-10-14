@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+.DS_Store
+coverage/
+*.log
+.env.local
+src-tauri/gen/
+test-results/
+*.tsbuildinfo
+.local-test/

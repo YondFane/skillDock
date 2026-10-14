@@ -1,0 +1,19 @@
+[package]
+name = "skilldock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "skilldock"
+
+[lib]
+name = "skilldock_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+skilldock-core = { path = "../crates/skilldock-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"

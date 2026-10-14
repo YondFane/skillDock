@@ -57,17 +57,10 @@ jobs:
             platform: windows-x64
             rust-targets: x86_64-pc-windows-msvc
             script: build:windows
-            installer: |
-              target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
-              target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe.sig
           - os: macos-latest
             platform: macos-universal
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             script: build:macos
-            installer: |
-              target/universal-apple-darwin/release/bundle/dmg/*.dmg
-              target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
-              target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -100,10 +93,22 @@ jobs:
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
           lipo "$app/Contents/MacOS/$executable" -verify_arch arm64 x86_64
           codesign --verify --deep --strict --verbose=2 "$app"
+      - name: Stage installers and update signatures
+        shell: bash
+        run: |
+          mkdir -p installers
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe \
+              target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe.sig installers/
+          else
+            cp target/universal-apple-darwin/release/bundle/dmg/*.dmg \
+              target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz \
+              target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig installers/
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: SkillDock-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}
-          path: ${{ matrix.installer }}
+          path: installers/
           if-no-files-found: error
           retention-days: 30
 

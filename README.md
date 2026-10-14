@@ -43,17 +43,17 @@ macOS 平台配置生成 `.app` 和 `.dmg`，Windows 平台配置生成 NSIS `.e
 
 ## 安装包与 GitHub 构建
 
-推送与应用版本一致的 `v*` 标签即可触发构建，例如 `v0.1.2`。两个平台通过测试、构建和签名验证后，流程会上传完整附件并公开发布 GitHub Release，供应用检查更新。
+推送与应用版本一致的 `v*` 标签即可触发构建，例如 `v0.1.3`。两个平台通过测试、构建和签名验证后，流程会上传完整附件并公开发布 GitHub Release，供应用检查更新。
 
 后续发布新版本时，先提交功能改动，再同步版本并推送标签：
 
 ```bash
-npm run release:version -- 0.1.3
+npm run release:version -- 0.1.4
 git add package.json package-lock.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json
-git commit -m "chore: release v0.1.3"
+git commit -m "chore: release v0.1.4"
 git push origin main
-git tag -a v0.1.3 -m "SkillDock v0.1.3"
-git push origin v0.1.3
+git tag -a v0.1.4 -m "SkillDock v0.1.4"
+git push origin v0.1.4
 ```
 
 `release:version` 同步前端、Tauri、Rust 与锁文件版本，界面显示的版本也会随之更新。发布前可编辑 `docs/testing-release-notes.md` 更新版本说明，并将其一并提交。
@@ -98,9 +98,9 @@ npm run build:macos     # macOS：target/universal-apple-darwin/release/bundle/d
 
 ## 应用内更新
 
-从 v0.1.2 起，在 **设置 → 应用更新** 点击“检查更新”即可查询最新公开版本、查看说明并选择“下载并安装”。应用通过 HTTPS 读取 GitHub Releases 的 `latest.json`，下载后验证更新签名，安装成功后重新启动。下载或签名校验失败时不会安装，错误信息显示在更新卡片中，可重试。
+从 v0.1.3 起，在 **设置 → 应用更新** 点击“检查更新”即可查询最新公开版本、查看说明并选择“下载并安装”。应用通过 HTTPS 读取 GitHub Releases 的 `latest.json`，下载后验证更新签名，安装成功后重新启动。下载或签名校验失败时不会安装，错误信息显示在更新卡片中，可重试。
 
-安装前保存目录修改；更新期间暂停其他应用操作，防止退出时丢失未保存内容。v0.1.0 没有更新入口，需要先手动安装 v0.1.2 或更高版本。应用不会读取草稿或自动在后台安装更新，也不会将本地资源上传到 GitHub。
+安装前保存目录修改；更新期间暂停其他应用操作，防止退出时丢失未保存内容。v0.1.0 没有更新入口，需要先手动安装 v0.1.3 或更高版本。应用不会读取草稿或自动在后台安装更新，也不会将本地资源上传到 GitHub。
 
 ## 使用方式
 

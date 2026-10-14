@@ -21,7 +21,7 @@ export const defaultAppearance: Appearance = { theme: 'light', fontFamily: 'syst
 
 export function loadAppearance(): Appearance {
   try {
-    const saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) ?? 'null');
+    const saved = JSON.parse(window.localStorage.getItem(APPEARANCE_KEY) ?? 'null');
     if (!saved || typeof saved !== 'object') return { ...defaultAppearance };
     return {
       theme: saved.theme === 'dark' ? 'dark' : 'light',
@@ -56,7 +56,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   const [storageError, setStorageError] = useState('');
   useLayoutEffect(() => {
     applyAppearance(appearance);
-    try { localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance)); setStorageError(''); }
+    try { window.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance)); setStorageError(''); }
     catch { setStorageError('偏好未能保存，本次选择将在关闭应用后重置。'); }
   }, [appearance]);
   useEffect(() => {

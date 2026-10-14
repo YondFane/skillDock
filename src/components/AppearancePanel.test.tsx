@@ -4,8 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppearanceProvider, APPEARANCE_KEY } from '../lib/appearance';
 import { AppearancePanel } from './AppearancePanel';
 
-beforeEach(() => localStorage.clear());
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+beforeEach(() => window.localStorage.clear());
+afterEach(() => { cleanup(); window.localStorage.clear(); vi.restoreAllMocks(); });
 const show = () => render(<AppearanceProvider><AppearancePanel disabled={false} /></AppearanceProvider>);
 
 it('keeps the chosen theme, font and size after reopening settings', async () => {
@@ -24,7 +24,7 @@ it('keeps the chosen theme, font and size after reopening settings', async () =>
 });
 
 it('recovers from damaged saved preferences and can reset a custom font', async () => {
-  localStorage.setItem(APPEARANCE_KEY, '{bad JSON');
+  window.localStorage.setItem(APPEARANCE_KEY, '{bad JSON');
   show();
   expect(screen.getByRole('radio', { name: '白色主题' })).toBeChecked();
   await userEvent.selectOptions(screen.getByLabelText('程序字体'), 'custom');
@@ -37,7 +37,7 @@ it('recovers from damaged saved preferences and can reset a custom font', async 
 });
 
 it('still changes the theme and explains when preferences cannot be saved', async () => {
-  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage unavailable'); });
+  vi.spyOn(window.Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage unavailable'); });
   show();
   await userEvent.click(screen.getByRole('radio', { name: '黑色主题' }));
   expect(document.documentElement.dataset.theme).toBe('dark');

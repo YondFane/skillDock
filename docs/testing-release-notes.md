@@ -1,4 +1,4 @@
-SkillDock v0.1.4 测试安装包，直接下载安装，不通过 App Store。
+SkillDock v0.1.5 测试安装包，直接下载安装，不通过 App Store。
 
 本次更新：
 

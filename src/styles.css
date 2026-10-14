@@ -183,6 +183,11 @@ svg { flex-shrink: 0; }
 .settings-card footer { padding-top: 15px; border-top: 1px solid #e9eedf; text-align: right; }
 .data-path { display: block; font-size: 10px; background: #f7faf2; border: 1px solid #e8eedf; border-radius: 5px; padding: 12px; color: #8d9d7f; overflow-wrap: anywhere; }
 .settings-note { font-size: 10px; color: #a8b39f; display: flex; align-items: center; gap: 7px; margin-top: 20px; }
+.update-status { font-size: 12px; color: #5f7357; line-height: 1.8; }
+.update-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; padding: 14px; background: #f7faf2; border-radius: 6px; font: inherit; font-size: 11px; line-height: 1.9; }
+.update-card progress { width: 100%; height: 8px; accent-color: #7e9e69; }
+.update-hint { font-size: 10px; line-height: 1.7; color: #99aa8f; }
+.settings-card .update-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .field { display: flex; flex-direction: column; font-size: 11px; gap: 8px; font-weight: 550; color: #5f7357; }
 .field input, .field select, .field textarea { border: 1px solid #dfe7d7; border-radius: 6px; padding: 10px 11px; font-size: 12px; color: #4e6546; background: #fdfefb; width: 100%; font-weight: 400; }
 .field textarea { resize: vertical; min-height: 110px; font-family: "SFMono-Regular", Consolas, "PingFang SC", monospace; font-size: 11px; line-height: 1.9; }

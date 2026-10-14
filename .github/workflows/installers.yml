@@ -29,6 +29,13 @@ jobs:
       - name: Validate release version
         id: version
         run: node scripts/release-version.mjs
+      - name: Verify update signing secrets
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo 'Missing updater signing key secret.' >&2; exit 1; }
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" || { echo 'Missing updater signing password secret.' >&2; exit 1; }
       - name: Verify existing tag points to this source
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
@@ -50,12 +57,17 @@ jobs:
             platform: windows-x64
             rust-targets: x86_64-pc-windows-msvc
             script: build:windows
-            installer: target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+            installer: |
+              target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+              target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe.sig
           - os: macos-latest
             platform: macos-universal
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             script: build:macos
-            installer: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            installer: |
+              target/universal-apple-darwin/release/bundle/dmg/*.dmg
+              target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+              target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -77,6 +89,9 @@ jobs:
       - run: cargo test -p skilldock-core --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run ${{ matrix.script }}
       - name: Verify macOS architectures and signature
         if: runner.os == 'macOS'
@@ -85,38 +100,42 @@ jobs:
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
           lipo "$app/Contents/MacOS/$executable" -verify_arch arm64 x86_64
           codesign --verify --deep --strict --verbose=2 "$app"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: SkillDock-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}
           path: ${{ matrix.installer }}
           if-no-files-found: error
           retention-days: 30
 
-  draft-release:
+  release:
     needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '26'
+      - uses: actions/download-artifact@v8
         with:
           pattern: SkillDock-${{ needs.prepare.outputs.version }}-*
           path: installers
           merge-multiple: true
-      - name: Generate installer checksums
-        working-directory: installers
+      - name: Generate signed update manifest and checksums
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          test "$(find . -maxdepth 1 -name '*-setup.exe' | wc -l)" -eq 1
-          test "$(find . -maxdepth 1 -name '*.dmg' | wc -l)" -eq 1
-          sha256sum -- *.exe *.dmg > SHA256SUMS.txt
+          node scripts/update-manifest.mjs installers "$RELEASE_VERSION" "$GITHUB_REPOSITORY" docs/testing-release-notes.md
+          cd installers
           sha256sum --check SHA256SUMS.txt
-      - name: Create or update draft release
+      - name: Upload release and publish version tags
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PUBLISH_RELEASE: ${{ github.ref_type == 'tag' }}
         run: |
           if gh release view "$RELEASE_TAG" --json isDraft > release.json 2>/dev/null; then
             test "$(jq -r .isDraft release.json)" = true || {
@@ -124,18 +143,23 @@ jobs:
               exit 1
             }
             gh release edit "$RELEASE_TAG" --draft --target "$GITHUB_SHA" \
-              --title "SkillDock $RELEASE_VERSION (test build)" \
+              --title "SkillDock $RELEASE_VERSION" \
               --notes-file docs/testing-release-notes.md
           else
             gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" \
-              --title "SkillDock $RELEASE_VERSION (test build)" \
+              --title "SkillDock $RELEASE_VERSION" \
               --notes-file docs/testing-release-notes.md
           fi
-          gh release upload "$RELEASE_TAG" installers/*.exe installers/*.dmg installers/SHA256SUMS.txt --clobber
+          gh release upload "$RELEASE_TAG" installers/* --clobber
+          if [ "$PUBLISH_RELEASE" = true ]; then
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi
           gh release view "$RELEASE_TAG" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: SkillDock-${{ needs.prepare.outputs.version }}-checksums
-          path: installers/SHA256SUMS.txt
+          name: SkillDock-${{ needs.prepare.outputs.version }}-update-manifest
+          path: |
+            installers/SHA256SUMS.txt
+            installers/latest.json
           if-no-files-found: error
           retention-days: 30

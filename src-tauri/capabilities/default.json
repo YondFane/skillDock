@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
-  "description": "SkillDock 主窗口仅使用目录与文件选择对话框；文件写入经业务命令执行。",
+  "description": "SkillDock 主窗口使用文件对话框与签名更新；资源文件写入经业务命令执行。",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["core:default", "dialog:allow-open", "updater:default", "process:allow-restart"]
 }

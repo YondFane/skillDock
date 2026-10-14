@@ -37,13 +37,28 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 npm run tauri build
 ```
 
-macOS 平台配置生成 `.app` 和 `.dmg`，Windows 平台配置生成 NSIS `.exe` 安装程序。此阶段未配置发布证书、公证或自动更新；macOS 使用 ad-hoc 临时签名，开发构建不代表正式签名发布。
+macOS 平台配置生成 `.app` 和 `.dmg`，Windows 平台配置生成 NSIS `.exe` 安装程序，并生成应用内更新所需的签名附件。此阶段未配置系统发行者证书与 Apple 公证；macOS 使用 ad-hoc 临时签名。更新签名用于校验下载文件，与系统发行者证书分别配置。
 
 `.github/workflows/ci.yml` 配置 macOS / Windows 的构建检查、界面测试和 Rust 集成测试。Windows 需要在对应系统或 CI 中实际运行后才能确认运行兼容性。
 
 ## 安装包与 GitHub 构建
 
-在 GitHub 的 **Actions → Build installers → Run workflow** 选择分支并运行，即可构建测试安装包。也可以推送与应用版本一致的 `v*` 标签触发，例如 `v0.1.0`。
+推送与应用版本一致的 `v*` 标签即可触发构建，例如 `v0.1.1`。两个平台通过测试、构建和签名验证后，流程会上传完整附件并公开发布 GitHub Release，供应用检查更新。
+
+后续发布新版本时，先提交功能改动，再同步版本并推送标签：
+
+```bash
+npm run release:version -- 0.1.2
+git add package.json package-lock.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json
+git commit -m "chore: release v0.1.2"
+git push origin main
+git tag -a v0.1.2 -m "SkillDock v0.1.2"
+git push origin v0.1.2
+```
+
+`release:version` 同步前端、Tauri、Rust 与锁文件版本，界面显示的版本也会随之更新。发布前可编辑 `docs/testing-release-notes.md` 更新版本说明，并将其一并提交。
+
+在 GitHub 的 **Actions → Build installers → Run workflow** 手动运行时，构建结果保持为草稿，不会改变应用的最新公开版本。
 
 该流程先校验版本，在 Windows 和 macOS 上执行测试与检查，再生成：
 
@@ -52,25 +67,40 @@ macOS 平台配置生成 `.app` 和 `.dmg`，Windows 平台配置生成 NSIS `.e
 | Windows | `SkillDock_<版本>_x64-setup.exe` | x64，当前用户安装，中英文安装界面 |
 | macOS | `SkillDock_<版本>_universal.dmg` | macOS 13+，Apple Silicon 与 Intel，拖入应用程序安装 |
 | 校验文件 | `SHA256SUMS.txt` | 两个安装包的 SHA-256 摘要 |
+| macOS 更新包 | `SkillDock.app.tar.gz` 和 `.sig` | 两种 Mac 架构共用的签名更新包 |
+| Windows 更新签名 | `SkillDock_<版本>_x64-setup.exe.sig` | 验证 NSIS 更新安装程序 |
+| 更新清单 | `latest.json` | 版本说明、平台下载地址和更新签名 |
 
-构建结果在 Actions 运行页的 Artifacts 中保留 30 天；两个平台都成功后，安装包和校验文件上传到对应版本的 **GitHub Release 草稿**。草稿由维护者在 Releases 页面查看，测试通过后再自行决定是否发布。不会自动公开发布，也不需要手动创建 `GITHUB_TOKEN` 或修改仓库全局权限；只有上传草稿的任务声明 `contents: write`。
+构建结果在 Actions 运行页的 Artifacts 中保留 30 天，GitHub Releases 也保存完整附件。上传附件时先创建草稿，全部上传成功后才公开标签发布，避免应用读到缺少附件的版本。流程拒绝覆盖已公开发布的版本，发布失败时可以重新运行；失败后留下的草稿不会被更新端点读取。无需手动创建 `GITHUB_TOKEN` 或修改仓库全局权限；只有发布任务声明 `contents: write`。
+
+GitHub 仓库 Secrets 已配置 `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。公钥保存在 `src-tauri/tauri.conf.json`，私钥与密码仅保存在维护者电脑的 `~/.tauri/skilldock-updater.key`、`~/.tauri/skilldock-updater.password.txt` 和 GitHub Secrets 中；需要备份并继续使用同一密钥，以便旧版本验证后续更新。不要将私钥或密码提交到 Git。
 
 在对应系统上本地构建：
 
-```bash
+```powershell
 npm ci
+$env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE/.tauri/skilldock-updater.key"
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = Get-Content -Raw "$env:USERPROFILE/.tauri/skilldock-updater.password.txt"
 npm run build:windows   # Windows：target/x86_64-pc-windows-msvc/release/bundle/nsis/
 ```
 
 ```bash
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
 npm ci
+export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/skilldock-updater.key"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$HOME/.tauri/skilldock-updater.password.txt")"
 npm run build:macos     # macOS：target/universal-apple-darwin/release/bundle/dmg/
 ```
 
-发布新版本前，同步修改 `package.json`、`package-lock.json`、根目录 `Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本，并更新 `Cargo.lock`。重复运行可以更新草稿附件，但流程拒绝覆盖已公开发布的版本，以及指向其他提交的同名版本标签。
+本地构建签名更新包需要同一组密钥；macOS 本机构建时需安全复制维护者的密钥与密码到上述路径。重复运行可以更新草稿附件，流程拒绝使用指向其他提交的同名标签。
 
 测试包的首次安装说明见 [测试发布说明](docs/testing-release-notes.md)。Windows 未签名，可能提示未知发布者；macOS 未公证，首次启动可能需要在“系统设置 → 隐私与安全性”允许打开。macOS 包直接下载分发，不涉及 App Store。
+
+## 应用内更新
+
+从 v0.1.1 起，在 **设置 → 应用更新** 点击“检查更新”即可查询最新公开版本、查看说明并选择“下载并安装”。应用通过 HTTPS 读取 GitHub Releases 的 `latest.json`，下载后验证更新签名，安装成功后重新启动。下载或签名校验失败时不会安装，错误信息显示在更新卡片中，可重试。
+
+安装前保存目录修改；更新期间暂停其他应用操作，防止退出时丢失未保存内容。v0.1.0 没有更新入口，需要先手动安装 v0.1.1。应用不会读取草稿或自动在后台安装更新，也不会将本地资源上传到 GitHub。
 
 ## 使用方式
 
@@ -134,4 +164,4 @@ src-tauri/                Tauri 生命周期、原生对话框、业务命令与
 crates/skilldock-core/     可独立测试的 Rust 核心：SQLite、适配器、文件快照、CRUD、恢复
 ```
 
-后续阶段：统一资源库的跨工具安装与卸载、通用规则映射、GitHub 下载与更新、资源导入导出、正式签名发布及 WSL 环境。
+后续阶段：统一资源库的跨工具安装与卸载、通用规则映射、技能资源的 GitHub 下载与更新、资源导入导出、系统发行者签名与 Apple 公证及 WSL 环境。

@@ -15,6 +15,7 @@ import { ReviewModal } from './components/ReviewModal';
 import { ResourceEditor } from './components/ResourceEditor';
 import { Modal } from './components/Modal';
 import { HistoryPage, ProjectsPage, SettingsPage } from './components/WorkspacePages';
+import { version } from '../package.json';
 
 const navigation = [
   { id: 'library' as Page, label: '资源库', icon: Layers2 },
@@ -163,7 +164,7 @@ export default function App() {
         {item.id === 'library' && <small>{library.length}</small>}{item.id === 'local' && <small>{local.length}</small>}
       </button>)}</nav>
       <div className="sidebar-context"><span className="eyebrow">CONNECTED TOOLS</span><div><span className="tool-dot claude-dot" />Claude Code<span className="muted">本地配置</span></div><div><span className="tool-dot codex-dot" />Codex<span className="muted">本地配置</span></div></div>
-      <div className="sidebar-bottom"><button className={'nav-item ' + (page === 'settings' ? 'active' : '')} onClick={() => navigate('settings')} disabled={busy}><Settings2 size={18} /><span>设置</span></button><div className="local-status"><span className="status-dot" /><span>本地优先</span><small>v0.1.0</small></div></div>
+      <div className="sidebar-bottom"><button className={'nav-item ' + (page === 'settings' ? 'active' : '')} onClick={() => navigate('settings')} disabled={busy}><Settings2 size={18} /><span>设置</span></button><div className="local-status"><span className="status-dot" /><span>本地优先</span><small>v{version}</small></div></div>
     </aside>
     <main className="main-workspace">
       <div className="topbar"><div className="breadcrumb">工作空间 <ChevronRight size={13} /><span>{page === 'settings' ? '设置' : navigation.find((item) => item.id === page)?.label}</span></div><div className="topbar-right"><span className="tiny-status">桌面应用</span><button className="icon-button" onClick={() => navigateSafely(() => { void refresh(); })} aria-label="重新扫描所有资源" disabled={busy || loading || !desktopAvailable}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button></div></div>
@@ -217,7 +218,7 @@ export default function App() {
       </>}
       {page === 'projects' && <ProjectsPage projects={overview?.projects ?? []} busy={busy} onAdd={(path) => void changeProject(path)} onRemove={(id) => void removeProject(id)} onError={setError} onOpen={(id) => { clearEditor(); setPage('local'); setEnvironment('claude:project:' + id); setTool('all'); setSearch(''); setKind('all'); }} />}
       {page === 'history' && <HistoryPage operations={operations} loading={historyLoading} busy={busy} onRestore={(id) => void prepare(() => api.restore(id))} />}
-      {page === 'settings' && overview && <SettingsPage settings={overview.settings} dataDir={overview.dataDir} busy={busy} onSave={(settings) => void saveSettings(settings)} onError={setError} />}
+      {page === 'settings' && overview && <SettingsPage settings={overview.settings} dataDir={overview.dataDir} busy={busy} onSave={(settings) => void saveSettings(settings)} onError={setError} onUpdateBusyChange={setBusy} />}
       <footer className="workspace-footer"><Anchor size={12} /> SkillDock · 给技能一个停靠的地方<span><FolderOpen size={12} /> macOS / Windows</span></footer>
     </main>
     {toast && <div className="toast" role="status"><Check size={17} /><span>{toast}</span><button className="icon-button" onClick={() => setToast(null)} aria-label="关闭通知"><X size={14} /></button></div>}

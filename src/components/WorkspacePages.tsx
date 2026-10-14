@@ -3,6 +3,8 @@ import { FolderOpen, Plus, ArrowUpRight, Trash2, History, RotateCcw, Check, Fold
 import { chooseFolder } from '../lib/api';
 import type { Operation, Project, Settings } from '../lib/types';
 import { actionLabel, errorMessage, formatDate, statusLabel } from '../lib/types';
+import { version } from '../../package.json';
+import { UpdatePanel } from './UpdatePanel';
 
 export function ProjectsPage({ projects, busy, onAdd, onRemove, onOpen, onError }: {
   projects: Project[]; busy: boolean; onAdd: (path: string) => void; onRemove: (id: string) => void;
@@ -46,8 +48,9 @@ export function HistoryPage({ operations, loading, busy, onRestore }: {
   </>;
 }
 
-export function SettingsPage({ settings, dataDir, busy, onSave, onError }: {
+export function SettingsPage({ settings, dataDir, busy, onSave, onError, onUpdateBusyChange }: {
   settings: Settings; dataDir: string; busy: boolean; onSave: (settings: Settings) => void; onError: (message: string) => void;
+  onUpdateBusyChange: (busy: boolean) => void;
 }) {
   const [draft, setDraft] = useState(settings);
   useEffect(() => { setDraft(settings); }, [settings]);
@@ -62,7 +65,7 @@ export function SettingsPage({ settings, dataDir, busy, onSave, onError }: {
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   return <>
-    <header className="page-heading"><div><span className="eyebrow">APPLICATION SETTINGS</span><h1>设置</h1><p>让 SkillDock 找到你正在使用的工具配置。</p></div><span className="quiet-pill">v0.1.0</span></header>
+    <header className="page-heading"><div><span className="eyebrow">APPLICATION SETTINGS</span><h1>设置</h1><p>让 SkillDock 找到你正在使用的工具配置。</p></div><span className="quiet-pill">v{version}</span></header>
     <div className="page-content settings-content">
       <section className="settings-card"><div className="section-heading"><h3>工具目录</h3><p>支持标准用户目录与自定义位置；保存后会重新扫描。</p></div>
         {fields.map((field) => <label className="field" key={field.key}>{field.title}
@@ -71,6 +74,7 @@ export function SettingsPage({ settings, dataDir, busy, onSave, onError }: {
         <footer><button className="button primary" disabled={busy || !dirty} onClick={() => onSave(draft)}><Check size={16} /> 保存并重新扫描</button></footer>
       </section>
       <section className="settings-card"><div className="section-heading"><h3>本地数据与备份</h3><p>资源文件、索引和变更备份保存在此目录。</p></div><code className="data-path">{dataDir}</code><div className="settings-note"><span className="status-dot" /> 无需登录 · 文件保存在本机 · 不上传资源内容</div></section>
+      <UpdatePanel disabled={busy || dirty} onBusyChange={onUpdateBusyChange} />
     </div>
   </>;
 }

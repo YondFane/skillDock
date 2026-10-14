@@ -9,11 +9,15 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
 const workspace = readFileSync('Cargo.toml', 'utf8')
   .match(/\[workspace\.package\]([^]*?)(?=\n\[|$)/)?.[1];
 const rustVersion = workspace?.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+const lockedPackages = readFileSync('Cargo.lock', 'utf8').split('[[package]]');
+const lockVersionsMatch = ['skilldock', 'skilldock-core'].every((name) =>
+  lockedPackages.some((block) => block.match(/^name\s*=\s*"([^"]+)"/m)?.[1] === name
+    && block.match(/^version\s*=\s*"([^"]+)"/m)?.[1] === version));
 if (readJson('package.json').version !== version
     || readJson('package-lock.json').version !== version
     || readJson('package-lock.json').packages[''].version !== version
-    || rustVersion !== version) {
-  throw new Error('Keep package.json, package-lock.json, Cargo.toml and tauri.conf.json versions in sync.');
+    || rustVersion !== version || !lockVersionsMatch) {
+  throw new Error('Keep package.json, package-lock.json, Cargo.toml, Cargo.lock and tauri.conf.json versions in sync.');
 }
 
 const tag = `v${version}`;

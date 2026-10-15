@@ -1,20 +1,17 @@
-SkillDock v0.1.6 测试安装包，直接下载安装，不通过 App Store。
+# SkillDock v0.1.7
 
-本次更新：
+## 中文
 
-- 在“设置 → 外观与字体”选择黑色或白色主题，编辑器、表单、弹窗与系统窗口外观同步切换。
-- 默认字号增大至 16px，可调整为 14、16、18、20 或 22px。
-- 支持系统默认、微软雅黑 / 苹方、宋体 / 华文宋体、等宽字体，以及本机已安装的自定义字体；界面与编辑器同步调整。
-- 外观选择立即生效，重启后自动恢复；可一键恢复默认白色主题、系统字体与 16px 字号。
-- 改善大字号在较小窗口中的滚动布局。
+- 隐藏界面滚动条，保留鼠标、触控板与键盘滚动。
+- 资源查看区调整为左侧列表 30%、右侧内容 70%，取消内容区最大宽度限制。
+- 新增提交代码、发版两个项目 Skill，统一变更文档及中英文提交与发版说明。
 
-- **Windows x64：**下载 `SkillDock_*_x64-setup.exe`，双击安装。默认仅安装到当前用户，支持简体中文与英文。缺少 WebView2 时安装程序会联网安装运行时。
-- **macOS 13+：**下载 `SkillDock_*_universal.dmg`，打开后将 SkillDock 拖到 Applications（应用程序）。同一个安装包支持 Apple Silicon 与 Intel。
-- **应用内更新：**在“设置 → 应用更新”点击“检查更新”，查看新版本说明后选择“下载并安装”。安装会关闭并重新启动应用，请先保存修改。下载文件通过更新签名验证。
-- **校验：**`SHA256SUMS.txt` 提供安装包、更新归档和签名文件的 SHA-256 摘要；`latest.json` 提供应用检查更新所需的信息。
+安装包：Windows x64 / macOS 13+（Apple Silicon 与 Intel）。Windows 未配置发行者证书，macOS 使用 ad-hoc 签名、未公证。
 
-此版本未配置 Windows 发行者证书；macOS 使用 ad-hoc 临时签名，未通过 Apple 公证。Windows 可能提示未知发布者；macOS 首次启动如被拦截，可在“系统设置 → 隐私与安全性”选择“仍要打开”。只对自己确认来源的测试包执行此操作。
+## English
 
-推送版本标签后，GitHub 会在两个平台都构建成功并上传完整附件后公开发布。手动运行构建则保持草稿状态。应用仅在用户点击后检查和安装更新；不需要登录 GitHub，也不会上传本地资源内容。
+- Hide interface scrollbars while preserving mouse, trackpad, and keyboard scrolling.
+- Set the resource list and viewer split to 30% / 70%, removing the viewer's maximum width.
+- Add project skills for commits and releases with change documentation and bilingual commit messages and release notes.
 
-旧版 v0.1.0 尚无应用内更新功能，需要先手动安装 v0.1.3 或更高版本；之后即可通过应用获取新版本。
+Installers: Windows x64 / macOS 13+ (Apple Silicon and Intel). Windows has no publisher certificate; macOS is ad-hoc signed and not notarized.

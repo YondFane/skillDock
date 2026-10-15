@@ -1,0 +1,3 @@
+interface:
+  display_name: "发版"
+  short_description: "为 SkillDock 同步版本、创建版本标签并发布简短中英文说明"

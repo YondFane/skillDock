@@ -1,0 +1,3 @@
+interface:
+  display_name: "提交代码"
+  short_description: "为 SkillDock 编写变更文档并创建含中英文描述的 Git 提交"

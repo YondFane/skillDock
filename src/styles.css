@@ -61,7 +61,9 @@
   --success-bg: #1c3021;
 }
 
-* { box-sizing: border-box; }
+/* Hide scrollbar chrome while keeping every scrollable area usable. */
+* { box-sizing: border-box; scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; width: 0; height: 0; }
 body { margin: 0; min-width: 760px; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
@@ -133,6 +135,7 @@ svg { flex-shrink: 0; }
 .summary-note span { font-size: 0.8125rem; display: block; color: var(--text-muted); margin-top: 4px; }
 .resource-workspace { margin: 0 30px; display: flex; gap: 16px; flex: 1; min-height: 250px; overflow: hidden; }
 .resource-list-panel { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; min-width: 0; flex: 1; overflow: hidden; }
+.with-editor .resource-list-panel { flex: 3; }
 .list-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border); padding: 15px 18px 12px; }
 .filter-tabs { display: flex; gap: 5px; background: var(--surface-muted); border-radius: 6px; padding: 3px; }
 .filter-tabs button { border: none; background: transparent; border-radius: 4px; font-size: 0.875rem; color: var(--text-muted); padding: 5px 10px; display: flex; gap: 8px; align-items: center; }
@@ -164,7 +167,7 @@ svg { flex-shrink: 0; }
 .resource-row-end { display: flex; align-items: flex-end; flex-direction: column; gap: 14px; color: var(--text-muted); font-size: 0.8125rem; white-space: nowrap; }
 .resource-warning-icon { color: var(--text-secondary); }
 .list-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding: 12px 19px; color: var(--text-muted); font-size: 0.8125rem; background: var(--surface); }
-.resource-editor { display: flex; flex-direction: column; flex: .95; min-width: 380px; max-width: 610px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.resource-editor { display: flex; flex-direction: column; flex: 7; min-width: 380px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
 .editor-header { display: flex; align-items: center; gap: 10px; padding: 16px 17px; border-bottom: 1px solid var(--border); }
 .editor-header .resource-type-icon { width: 32px; height: 34px; border-radius: 7px; }
 .editor-heading { flex: 1; min-width: 0; }

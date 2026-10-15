@@ -29,6 +29,8 @@ npm run tauri dev
 
 ## 构建与检查
 
+项目内置“提交代码”和“发版”两个 Skill，约定中英文提交信息、`docs/` 变更文档、版本 Tag 与简短中英文发版说明，使用方式见[项目工作流 Skill](docs/project-skills.md)。
+
 ```bash
 npm test
 npm run build
@@ -51,9 +53,9 @@ macOS 平台配置生成 `.app` 和 `.dmg`，Windows 平台配置生成 NSIS `.e
 ```bash
 npm run release:version -- 0.1.7
 git add package.json package-lock.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json
-git commit -m "chore: release v0.1.7"
+git commit -m "chore: 发布 v0.1.7 / Release v0.1.7"
 git push origin main
-git tag -a v0.1.7 -m "SkillDock v0.1.7"
+git tag -a v0.1.7 -m "发布 SkillDock v0.1.7 / Release SkillDock v0.1.7"
 git push origin v0.1.7
 ```
 

@@ -46,6 +46,32 @@ pub struct Project {
     pub path: String,
 }
 
+pub const DEFAULT_WORKSPACE_ID: &str = "default";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Workspace {
+    pub id: String,
+    pub name: String,
+    pub project_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectImportFailure {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddProjectsResult {
+    pub overview: Overview,
+    pub added_project_ids: Vec<String>,
+    pub already_present: usize,
+    pub failures: Vec<ProjectImportFailure>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Environment {
@@ -107,6 +133,7 @@ pub struct Overview {
     pub resources: Vec<Resource>,
     pub environments: Vec<Environment>,
     pub projects: Vec<Project>,
+    pub workspaces: Vec<Workspace>,
     pub settings: Settings,
     pub data_dir: String,
     pub warnings: Vec<String>,
@@ -130,6 +157,23 @@ pub struct EditInput {
     pub compatibility: Compatibility,
     pub relative_path: String,
     pub content: String,
+    pub expected_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEdit {
+    pub relative_path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditFilesInput {
+    pub id: String,
+    pub name: String,
+    pub compatibility: Compatibility,
+    pub files: Vec<FileEdit>,
     pub expected_fingerprint: String,
 }
 

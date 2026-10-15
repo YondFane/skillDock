@@ -6,6 +6,9 @@ export type Page = 'library' | 'local' | 'projects' | 'history' | 'settings';
 
 export interface Settings { claudeRoot: string; codexRoot: string; codexSkillsRoot: string }
 export interface Project { id: string; name: string; path: string }
+export interface ProjectWorkspace { id: string; name: string; projectIds: string[] }
+export interface ProjectImportFailure { path: string; message: string }
+export interface AddProjectsResult { overview: Overview; addedProjectIds: string[]; alreadyPresent: number; failures: ProjectImportFailure[] }
 export interface Environment {
   id: string; name: string; tool: Tool; scope: string; projectId: string | null;
   root: string; skillsRoot: string; rulesRoot: string | null; instructionFiles: string[]; readOnly: boolean;
@@ -21,7 +24,7 @@ export interface ResourceDetail {
   resource: Resource; content: string; relativePath: string; fingerprint: string; files: ResourceFile[];
 }
 export interface Overview {
-  resources: Resource[]; environments: Environment[]; projects: Project[];
+  resources: Resource[]; environments: Environment[]; projects: Project[]; workspaces: ProjectWorkspace[];
   settings: Settings; dataDir: string; warnings: string[];
 }
 export interface CreateInput {
@@ -30,6 +33,10 @@ export interface CreateInput {
 export interface EditInput {
   id: string; name: string; compatibility: Compatibility; relativePath: string;
   content: string; expectedFingerprint: string;
+}
+export interface FileEdit { relativePath: string; content: string }
+export interface EditFilesInput {
+  id: string; name: string; compatibility: Compatibility; files: FileEdit[]; expectedFingerprint: string;
 }
 export interface ChangePreview {
   id: string; action: string; name: string; targetPath: string; beforeContent: string; afterContent: string;
@@ -40,7 +47,7 @@ export interface Operation {
   status: string; createdAt: number; canRestore: boolean; error: string | null;
 }
 export interface ApplyResult { resourceId: string | null; operationId: string; message: string }
-export interface AppError { code: string; message: string }
+export interface AppError { code: string; message: string; existingResourceId?: string }
 
 export const compatibilityLabel: Record<Compatibility, string> = { both: 'Claude + Codex', claude: 'Claude Code', codex: 'Codex' };
 export const actionLabel: Record<string, string> = { create: '新建', edit: '编辑', delete: '删除', import: '导入', restore: '恢复' };

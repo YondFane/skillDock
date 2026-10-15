@@ -63,8 +63,23 @@ impl Store {
              CREATE TABLE IF NOT EXISTS assets (id TEXT PRIMARY KEY, data TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, data TEXT NOT NULL);
-             PRAGMA user_version = 1;"
+             CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, data TEXT NOT NULL);"
+        )?;
+        // Add grouping without rewriting project identities, paths or resource files.
+        connection.execute_batch(
+            "BEGIN IMMEDIATE;
+             CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS workspace_projects (
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                PRIMARY KEY(workspace_id, project_id)
+             );
+             INSERT OR IGNORE INTO workspaces(id,name) VALUES('default','默认工作区');
+             INSERT OR IGNORE INTO workspace_projects(workspace_id,project_id)
+                SELECT 'default', id FROM projects
+                WHERE NOT EXISTS(SELECT 1 FROM workspace_projects WHERE project_id=projects.id);
+             PRAGMA user_version = 2;
+             COMMIT;",
         )?;
         let mut store = Self {
             root,
@@ -146,30 +161,175 @@ impl Store {
     }
 
     pub fn add_project(&mut self, path: &str) -> Result<Overview> {
+        let result = self.add_projects_to_workspace(DEFAULT_WORKSPACE_ID, vec![path.to_owned()])?;
+        if let Some(failure) = result.failures.first() {
+            return Err(AppError::new("path", &failure.message));
+        }
+        Ok(result.overview)
+    }
+
+    fn project_from_path(&self, path: &str) -> Result<Project> {
         let path = PathBuf::from(path).canonicalize()?;
         if !path.is_dir() {
             return Err(AppError::new("path", "请选择一个存在的项目目录。"));
         }
         self.validate_root(&path)?;
-        let project = Project {
-            id: uuid(),
+        let id = self
+            .connection
+            .query_row(
+                "SELECT id FROM projects WHERE path=?1",
+                [display(&path)],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or_else(uuid);
+        Ok(Project {
+            id,
             name: path
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned(),
             path: display(&path),
-        };
-        let already_registered: bool = self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM projects WHERE path=?1)",
-            [&project.path],
-            |r| r.get(0),
+        })
+    }
+
+    pub fn workspaces(&self) -> Result<Vec<Workspace>> {
+        let mut query = self.connection.prepare("SELECT id,name FROM workspaces ORDER BY CASE WHEN id='default' THEN 0 ELSE 1 END, name,id")?;
+        let groups = query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        groups.into_iter().map(|(id, name)| {
+            let mut members = self.connection.prepare("SELECT project_id FROM workspace_projects WHERE workspace_id=?1 ORDER BY project_id")?;
+            let project_ids = members.query_map([&id], |row| row.get(0))?.collect::<std::result::Result<Vec<String>, _>>()?;
+            Ok(Workspace { id, name, project_ids })
+        }).collect()
+    }
+
+    fn validate_workspace(&self, id: &str) -> Result<()> {
+        let exists: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
+            [id],
+            |row| row.get(0),
         )?;
-        if !already_registered {
-            self.connection.execute(
-                "INSERT INTO projects(id,path,data) VALUES(?1,?2,?3)",
+        if !exists {
+            return Err(AppError::new("notFound", "工作区已不存在，请重新选择。"));
+        }
+        Ok(())
+    }
+
+    fn validate_workspace_name(&self, name: &str, except: Option<&str>) -> Result<String> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
+            return Err(AppError::new(
+                "validation",
+                "工作区名称需为 1–80 个字符，不能包含控制字符。",
+            ));
+        }
+        if self.workspaces()?.iter().any(|item| {
+            Some(item.id.as_str()) != except && item.name.to_lowercase() == name.to_lowercase()
+        }) {
+            return Err(AppError::new("exists", "已有同名工作区，请使用其他名称。"));
+        }
+        Ok(name.to_owned())
+    }
+
+    pub fn create_workspace(&mut self, name: &str) -> Result<Overview> {
+        let name = self.validate_workspace_name(name, None)?;
+        self.connection.execute(
+            "INSERT INTO workspaces(id,name) VALUES(?1,?2)",
+            params![uuid(), name],
+        )?;
+        self.overview()
+    }
+
+    pub fn rename_workspace(&mut self, id: &str, name: &str) -> Result<Overview> {
+        self.validate_workspace(id)?;
+        let name = self.validate_workspace_name(name, Some(id))?;
+        self.connection.execute(
+            "UPDATE workspaces SET name=?1 WHERE id=?2",
+            params![name, id],
+        )?;
+        self.overview()
+    }
+
+    pub fn delete_workspace(&mut self, id: &str) -> Result<Overview> {
+        self.validate_workspace(id)?;
+        if id == DEFAULT_WORKSPACE_ID {
+            return Err(AppError::new("validation", "默认工作区不能删除。"));
+        }
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM workspaces WHERE id=?1", [id])?;
+        // Keep projects accessible even if their only group was removed.
+        transaction.execute("INSERT OR IGNORE INTO workspace_projects(workspace_id,project_id) SELECT 'default',id FROM projects WHERE NOT EXISTS(SELECT 1 FROM workspace_projects WHERE project_id=projects.id)", [])?;
+        transaction.commit()?;
+        self.overview()
+    }
+
+    pub fn add_projects_to_workspace(
+        &mut self,
+        workspace_id: &str,
+        paths: Vec<String>,
+    ) -> Result<AddProjectsResult> {
+        self.validate_workspace(workspace_id)?;
+        let mut failures = Vec::new();
+        let mut projects = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for path in paths {
+            match self.project_from_path(&path) {
+                Ok(project) if seen.insert(project.path.clone()) => projects.push(project),
+                Ok(_) => {}
+                Err(error) => failures.push(ProjectImportFailure {
+                    path,
+                    message: error.message,
+                }),
+            }
+        }
+        let mut added_project_ids = Vec::new();
+        let mut already_present = 0;
+        let transaction = self.connection.transaction()?;
+        for project in projects {
+            transaction.execute(
+                "INSERT OR IGNORE INTO projects(id,path,data) VALUES(?1,?2,?3)",
                 params![project.id, project.path, serde_json::to_string(&project)?],
             )?;
+            let inserted = transaction.execute(
+                "INSERT OR IGNORE INTO workspace_projects(workspace_id,project_id) VALUES(?1,?2)",
+                params![workspace_id, project.id],
+            )?;
+            if inserted == 1 {
+                added_project_ids.push(project.id);
+            } else {
+                already_present += 1;
+            }
+        }
+        transaction.commit()?;
+        Ok(AddProjectsResult {
+            overview: self.overview()?,
+            added_project_ids,
+            already_present,
+            failures,
+        })
+    }
+
+    pub fn remove_project_from_workspace(
+        &mut self,
+        workspace_id: &str,
+        project_id: &str,
+    ) -> Result<Overview> {
+        self.validate_workspace(workspace_id)?;
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM workspace_projects WHERE workspace_id=?1 AND project_id=?2",
+            params![workspace_id, project_id],
+        )?;
+        let removed = transaction.execute("DELETE FROM projects WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM workspace_projects WHERE project_id=?1)", [project_id])?;
+        transaction.commit()?;
+        if removed > 0 {
+            self.pending.clear();
+            self.locals.clear();
         }
         self.overview()
     }
@@ -311,6 +471,7 @@ impl Store {
             resources,
             environments,
             projects,
+            workspaces: self.workspaces()?,
             settings,
             data_dir: display(&self.root),
             warnings,
@@ -490,10 +651,12 @@ impl Store {
         };
         self.validate_location(&location)?;
         if location.path.exists() {
-            return Err(AppError::new(
+            let mut error = AppError::new(
                 "exists",
                 "目标已存在。请从列表打开它进行编辑，或使用其他名称。",
-            ));
+            );
+            error.existing_resource_id = Some(location.id.clone());
+            return Err(error);
         }
         self.ensure_no_case_collision(&location.path)?;
         let after = Snapshot {
@@ -534,12 +697,27 @@ impl Store {
     }
 
     pub fn preview_edit(&mut self, input: EditInput) -> Result<ChangePreview> {
+        self.preview_edit_files(EditFilesInput {
+            id: input.id,
+            name: input.name,
+            compatibility: input.compatibility,
+            files: vec![FileEdit {
+                relative_path: input.relative_path,
+                content: input.content,
+            }],
+            expected_fingerprint: input.expected_fingerprint,
+        })
+    }
+
+    pub fn preview_edit_files(&mut self, input: EditFilesInput) -> Result<ChangePreview> {
+        if input.files.len() > files::MAX_FILES {
+            return Err(AppError::new("validation", "一次最多编辑 5,000 个文件。"));
+        }
         let (resource, location) = self.resolve(&input.id)?;
         if resource.read_only {
             return Err(AppError::new("readOnly", "该资源仅支持查看。"));
         }
         self.validate_location(&location)?;
-        validate_text(&input.content)?;
         let before = Snapshot::read(&location.path, location.is_directory)?;
         if self.state_fingerprint(&location, &before)? != input.expected_fingerprint {
             return Err(AppError::conflict());
@@ -547,7 +725,26 @@ impl Store {
         let mut after = before
             .clone()
             .ok_or_else(|| AppError::new("notFound", "资源已被移除。"))?;
-        after.replace_text(&input.relative_path, &input.content)?;
+        let mut seen = std::collections::HashSet::new();
+        for file in &input.files {
+            let path = relative_path(&file.relative_path)?;
+            if !seen.insert(path) {
+                return Err(AppError::new("validation", "修改列表包含重复文件。"));
+            }
+            validate_text(&file.content)?;
+            // Do not turn a binary or oversized file into an editable text file.
+            after.text(&file.relative_path)?;
+            after.replace_text(&file.relative_path, &file.content)?;
+        }
+        if after
+            .files
+            .iter()
+            .map(|file| file.bytes.len() as u64)
+            .sum::<u64>()
+            > files::MAX_BYTES
+        {
+            return Err(AppError::new("limit", "修改后的完整资源不能超过 200 MB。"));
+        }
         let mut asset_after = location.asset.clone();
         if let Some(asset) = &mut asset_after {
             let main = after.text(&location.main_file)?;
@@ -558,8 +755,8 @@ impl Store {
             asset.updated_at = now();
             asset.revision += 1;
             asset.content_hash = digest(main.as_bytes());
-        } else if location.kind == Kind::Skill && input.relative_path == location.main_file {
-            let (name, _) = skill_metadata(&input.content)?;
+        } else if location.kind == Kind::Skill {
+            let (name, _) = skill_metadata(&after.text(&location.main_file)?)?;
             let folder = location
                 .path
                 .file_name()

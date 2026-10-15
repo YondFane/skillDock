@@ -1,33 +1,10 @@
-import { useEffect, useState } from 'react';
-import { FolderOpen, Plus, ArrowUpRight, Trash2, History, RotateCcw, Check, FolderKanban, LoaderCircle } from 'lucide-react';
+import { FolderOpen, History, RotateCcw, Check, LoaderCircle } from 'lucide-react';
 import { chooseFolder } from '../lib/api';
-import type { Operation, Project, Settings } from '../lib/types';
+import type { Operation, Settings } from '../lib/types';
 import { actionLabel, errorMessage, formatDate, statusLabel } from '../lib/types';
 import { version } from '../../package.json';
 import { UpdatePanel } from './UpdatePanel';
 import { AppearancePanel } from './AppearancePanel';
-
-export function ProjectsPage({ projects, busy, onAdd, onRemove, onOpen, onError }: {
-  projects: Project[]; busy: boolean; onAdd: (path: string) => void; onRemove: (id: string) => void;
-  onOpen: (id: string) => void; onError: (message: string) => void;
-}) {
-  const add = async () => {
-    try { const path = await chooseFolder('选择需要管理技能与规则的项目目录'); if (path) onAdd(path); }
-    catch (error) { onError(errorMessage(error)); }
-  };
-  return <>
-    <header className="page-heading"><div><span className="eyebrow">PROJECT WORKSPACES</span><h1>项目</h1><p>为每个项目保留自己的技能与工作约定。</p></div><button className="button primary" onClick={() => void add()} disabled={busy}><Plus size={16} /> 添加项目</button></header>
-    <div className="page-content">
-      <div className="info-strip"><FolderKanban size={18} /><p>添加项目后，即可管理该目录中的 Claude Code 与 Codex 配置。移除登记会保留项目文件。</p></div>
-      {projects.length === 0 ? <div className="empty-state large-empty"><div className="empty-icon"><FolderOpen size={29} /></div><h3>从一个项目开始</h3><p>选择你正在开发的项目，发现它的技能和规则。</p><button className="button secondary" onClick={() => void add()} disabled={busy}><Plus size={15} /> 选择项目目录</button></div>
-        : <div className="project-grid">{projects.map((project) => <article className="project-card" key={project.id}>
-          <div className="project-icon"><FolderOpen size={24} /></div><h3>{project.name}</h3><code>{project.path}</code>
-          <div className="project-tools"><span className="badge badge-neutral">Claude Code</span><span className="badge badge-neutral">Codex</span></div>
-          <footer><button className="button small secondary" onClick={() => onOpen(project.id)}>查看配置 <ArrowUpRight size={14} /></button><button className="icon-button danger-hover" aria-label={'移除项目 ' + project.name} onClick={() => onRemove(project.id)} disabled={busy}><Trash2 size={16} /></button></footer>
-        </article>)}</div>}
-    </div>
-  </>;
-}
 
 export function HistoryPage({ operations, loading, busy, onRestore }: {
   operations: Operation[]; loading: boolean; busy: boolean; onRestore: (id: string) => void;
@@ -49,19 +26,18 @@ export function HistoryPage({ operations, loading, busy, onRestore }: {
   </>;
 }
 
-export function SettingsPage({ settings, dataDir, busy, onSave, onError, onUpdateBusyChange }: {
-  settings: Settings; dataDir: string; busy: boolean; onSave: (settings: Settings) => void; onError: (message: string) => void;
+export function SettingsPage({ settings, draft, dataDir, busy, hasDrafts, hasResourceDrafts, onDraftChange, onSave, onError, onUpdateBusyChange }: {
+  settings: Settings; draft: Settings; dataDir: string; busy: boolean; hasDrafts: boolean; hasResourceDrafts: boolean;
+  onDraftChange: (draft: Settings) => void; onSave: () => void; onError: (message: string) => void;
   onUpdateBusyChange: (busy: boolean) => void;
 }) {
-  const [draft, setDraft] = useState(settings);
-  useEffect(() => { setDraft(settings); }, [settings]);
   const fields: { key: keyof Settings; title: string; hint: string }[] = [
     { key: 'claudeRoot', title: 'Claude Code 配置目录', hint: '默认是用户目录下的 .claude；包含 skills、rules 和 CLAUDE.md。' },
     { key: 'codexRoot', title: 'Codex 配置目录', hint: '默认是 .codex；识别 CODEX_HOME。行为指令存放在 AGENTS.md。' },
     { key: 'codexSkillsRoot', title: 'Codex 全局技能目录', hint: '默认是用户目录下的 .agents/skills，独立于 Codex 配置目录。' },
   ];
   const browse = async (key: keyof Settings) => {
-    try { const path = await chooseFolder('选择配置目录'); if (path) setDraft((current) => ({ ...current, [key]: path })); }
+    try { const path = await chooseFolder('选择配置目录'); if (path) onDraftChange({ ...draft, [key]: path }); }
     catch (error) { onError(errorMessage(error)); }
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
@@ -71,12 +47,14 @@ export function SettingsPage({ settings, dataDir, busy, onSave, onError, onUpdat
       <AppearancePanel disabled={busy} />
       <section className="settings-card"><div className="section-heading"><h3>工具目录</h3><p>支持标准用户目录与自定义位置；保存后会重新扫描。</p></div>
         {fields.map((field) => <label className="field" key={field.key}>{field.title}
-          <div className="path-picker"><input value={draft[field.key]} onChange={(event) => setDraft((current) => ({ ...current, [field.key]: event.target.value }))} disabled={busy} /><button className="button secondary" onClick={() => void browse(field.key)} disabled={busy}><FolderOpen size={15} /> 浏览</button></div><small>{field.hint}</small>
+          <div className="path-picker"><input value={draft[field.key]} onChange={(event) => onDraftChange({ ...draft, [field.key]: event.target.value })} disabled={busy} /><button className="button secondary" onClick={() => void browse(field.key)} disabled={busy}><FolderOpen size={15} /> 浏览</button></div><small>{field.hint}</small>
         </label>)}
-        <footer><button className="button primary" disabled={busy || !dirty} onClick={() => onSave(draft)}><Check size={16} /> 保存并重新扫描</button></footer>
+        {hasResourceDrafts && <p className="update-hint">请先保存或放弃资源草稿，再修改工具目录。</p>}
+        <footer><button className="button primary" disabled={busy || !dirty || hasResourceDrafts} onClick={onSave}><Check size={16} /> 保存并重新扫描</button></footer>
       </section>
       <section className="settings-card"><div className="section-heading"><h3>本地数据与备份</h3><p>资源文件、索引和变更备份保存在此目录。</p></div><code className="data-path">{dataDir}</code><div className="settings-note"><span className="status-dot" /> 无需登录 · 文件保存在本机 · 不上传资源内容</div></section>
-      <UpdatePanel disabled={busy || dirty} onBusyChange={onUpdateBusyChange} />
+      {hasDrafts && <p className="update-hint" role="status">请先处理未保存草稿，再安装应用更新。</p>}
+      <UpdatePanel disabled={busy || dirty} installationBlocked={hasDrafts} onBusyChange={onUpdateBusyChange} />
     </div>
   </>;
 }

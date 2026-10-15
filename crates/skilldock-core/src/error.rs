@@ -5,6 +5,8 @@ use serde::Serialize;
 pub struct AppError {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub existing_resource_id: Option<String>,
 }
 
 impl AppError {
@@ -12,12 +14,13 @@ impl AppError {
         Self {
             code: code.into(),
             message: message.into(),
+            existing_resource_id: None,
         }
     }
     pub(crate) fn conflict() -> Self {
         Self::new(
             "conflict",
-            "文件已被其他程序修改。请重新读取内容，再预览此次变更。",
+            "文件已被其他程序修改。请重新读取并核对内容后再保存。",
         )
     }
 }

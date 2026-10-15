@@ -1008,3 +1008,425 @@ fn imports_edits_and_restores_preserve_private_file_and_directory_modes() {
         0o600
     );
 }
+
+fn batch(
+    detail: &skilldock_core::ResourceDetail,
+    files: Vec<(&str, String)>,
+) -> skilldock_core::EditFilesInput {
+    skilldock_core::EditFilesInput {
+        id: detail.resource.id.clone(),
+        name: detail.resource.name.clone(),
+        compatibility: detail.resource.compatibility.clone(),
+        expected_fingerprint: detail.fingerprint.clone(),
+        files: files
+            .into_iter()
+            .map(|(path, content)| skilldock_core::FileEdit {
+                relative_path: path.into(),
+                content,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn batch_edit_is_one_backup_and_restores_all_files() {
+    let mut f = Fixture::new();
+    let source = f.source("batch-review");
+    fs::create_dir(source.join("references")).unwrap();
+    fs::write(source.join("references/guide.md"), "original guide").unwrap();
+    fs::write(source.join("image.bin"), [0, 255, 20]).unwrap();
+    let preview = f
+        .store
+        .preview_import(&source.to_string_lossy(), Compatibility::Both)
+        .unwrap();
+    let id = f.store.apply(&preview.id).unwrap().resource_id.unwrap();
+    let original = f.store.resource_detail(&id, None).unwrap();
+    let history_before = f.store.history().unwrap().len();
+    let changed_main = original.content.clone() + "\n- batch change";
+    let preview = f
+        .store
+        .preview_edit_files(batch(
+            &original,
+            vec![
+                ("SKILL.md", changed_main.clone()),
+                ("references/guide.md", "updated guide".into()),
+            ],
+        ))
+        .unwrap();
+    assert_eq!(
+        f.store.resource_detail(&id, None).unwrap().content,
+        original.content
+    );
+    assert_eq!(preview.changed_files.len(), 2);
+    let operation = f.store.apply(&preview.id).unwrap().operation_id;
+    assert_eq!(f.store.history().unwrap().len(), history_before + 1);
+    assert_eq!(
+        f.store.resource_detail(&id, None).unwrap().content,
+        changed_main
+    );
+    assert_eq!(
+        f.store
+            .resource_detail(&id, Some("references/guide.md"))
+            .unwrap()
+            .content,
+        "updated guide"
+    );
+    assert_eq!(
+        fs::read(Path::new(&original.resource.path).join("image.bin")).unwrap(),
+        [0, 255, 20]
+    );
+    let restore = f.store.preview_restore(&operation).unwrap();
+    f.store.apply(&restore.id).unwrap();
+    assert_eq!(
+        f.store.resource_detail(&id, None).unwrap().content,
+        original.content
+    );
+    assert_eq!(
+        f.store
+            .resource_detail(&id, Some("references/guide.md"))
+            .unwrap()
+            .content,
+        "original guide"
+    );
+}
+
+#[test]
+fn invalid_batch_members_never_partially_write() {
+    let mut f = Fixture::new();
+    let id = f.skill("batch-validate");
+    let original = f.store.resource_detail(&id, None).unwrap();
+    for files in [
+        vec![
+            ("SKILL.md", skill("batch-validate")),
+            ("missing.md", "missing".into()),
+        ],
+        vec![
+            ("SKILL.md", skill("batch-validate")),
+            ("../escape.md", "escape".into()),
+        ],
+        vec![
+            ("SKILL.md", skill("batch-validate")),
+            ("SKILL.md", "duplicate".into()),
+        ],
+        vec![("SKILL.md", "invalid frontmatter".into())],
+    ] {
+        assert!(f.store.preview_edit_files(batch(&original, files)).is_err());
+        let current = f.store.resource_detail(&id, None).unwrap();
+        assert_eq!(current.content, original.content);
+        assert_eq!(current.fingerprint, original.fingerprint);
+    }
+    assert_eq!(f.store.history().unwrap().len(), 1);
+}
+
+#[test]
+fn batch_edit_keeps_conflict_checks_before_and_after_preview() {
+    let mut f = Fixture::new();
+    let id = f.skill("batch-conflict");
+    let original = f.store.resource_detail(&id, None).unwrap();
+    let input = batch(
+        &original,
+        vec![("SKILL.md", original.content.clone() + "\n- local")],
+    );
+    let preview = f.store.preview_edit_files(input.clone()).unwrap();
+    let disk = Path::new(&original.resource.path).join("SKILL.md");
+    fs::write(&disk, original.content.clone() + "\n- external").unwrap();
+    assert_eq!(f.store.apply(&preview.id).unwrap_err().code, "conflict");
+    assert_eq!(
+        f.store.preview_edit_files(input).unwrap_err().code,
+        "conflict"
+    );
+    assert!(fs::read_to_string(disk).unwrap().ends_with("- external"));
+}
+
+#[test]
+fn batch_rejects_binary_files_and_supports_metadata_only_updates() {
+    let mut f = Fixture::new();
+    let source = f.source("batch-binary");
+    fs::write(source.join("image.bin"), [255, 254]).unwrap();
+    let preview = f
+        .store
+        .preview_import(&source.to_string_lossy(), Compatibility::Both)
+        .unwrap();
+    let id = f.store.apply(&preview.id).unwrap().resource_id.unwrap();
+    let detail = f.store.resource_detail(&id, None).unwrap();
+    assert_eq!(
+        f.store
+            .preview_edit_files(batch(&detail, vec![("image.bin", "replaced".into())]))
+            .unwrap_err()
+            .code,
+        "binary"
+    );
+    let mut input = batch(&detail, vec![]);
+    input.compatibility = Compatibility::Codex;
+    let preview = f.store.preview_edit_files(input).unwrap();
+    f.store.apply(&preview.id).unwrap();
+    assert_eq!(
+        f.store
+            .resource_detail(&id, None)
+            .unwrap()
+            .resource
+            .compatibility,
+        Compatibility::Codex
+    );
+}
+
+#[test]
+fn creation_collision_identifies_the_actual_codex_instruction_file() {
+    let mut f = Fixture::new();
+    let root = f.home.join(".codex");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("AGENTS.md"), "# existing rules").unwrap();
+    fs::write(root.join("AGENTS.override.md"), "").unwrap();
+    let existing = f
+        .store
+        .overview()
+        .unwrap()
+        .resources
+        .into_iter()
+        .find(|r| r.main_file == "AGENTS.md")
+        .unwrap();
+    let error = f
+        .store
+        .preview_create(CreateInput {
+            target: "codex:global".into(),
+            kind: Kind::Rule,
+            name: "工作约定".into(),
+            compatibility: Compatibility::Codex,
+            content: "# new rules".into(),
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "exists");
+    assert_eq!(
+        error.existing_resource_id.as_deref(),
+        Some(existing.id.as_str())
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("AGENTS.md")).unwrap(),
+        "# existing rules"
+    );
+}
+
+#[test]
+fn workspaces_share_project_identity_and_scanned_configuration() {
+    let mut fixture = Fixture::new();
+    let project = fixture.source("shared-project");
+    fs::write(project.join("AGENTS.md"), "# shared rules").unwrap();
+    let groups = fixture.store.create_workspace("公司项目").unwrap();
+    let group = groups
+        .workspaces
+        .iter()
+        .find(|w| w.name == "公司项目")
+        .unwrap()
+        .id
+        .clone();
+    let first = fixture
+        .store
+        .add_projects_to_workspace("default", vec![project.display().to_string()])
+        .unwrap();
+    let id = first.added_project_ids[0].clone();
+    let shared = fixture
+        .store
+        .add_projects_to_workspace(&group, vec![project.display().to_string()])
+        .unwrap();
+    assert_eq!(shared.added_project_ids, vec![id.clone()]);
+    assert_eq!(shared.overview.projects.len(), 1);
+    assert!(shared
+        .overview
+        .workspaces
+        .iter()
+        .all(|w| w.project_ids == vec![id.clone()]));
+    assert_eq!(
+        shared
+            .overview
+            .resources
+            .iter()
+            .filter(|r| r.main_file == "AGENTS.md")
+            .count(),
+        1
+    );
+    let overview = fixture
+        .store
+        .remove_project_from_workspace("default", &id)
+        .unwrap();
+    assert_eq!(overview.projects[0].id, id);
+    assert!(overview
+        .workspaces
+        .iter()
+        .find(|w| w.id == "default")
+        .unwrap()
+        .project_ids
+        .is_empty());
+    assert_eq!(
+        overview
+            .workspaces
+            .iter()
+            .find(|w| w.id == group)
+            .unwrap()
+            .project_ids,
+        vec![id.clone()]
+    );
+    let overview = fixture
+        .store
+        .remove_project_from_workspace(&group, &id)
+        .unwrap();
+    assert!(overview.projects.is_empty());
+    assert_eq!(
+        fs::read_to_string(project.join("AGENTS.md")).unwrap(),
+        "# shared rules"
+    );
+}
+
+#[test]
+fn batch_projects_deduplicate_paths_and_report_partial_failures() {
+    let mut fixture = Fixture::new();
+    let first = fixture.source("first-project");
+    let second = fixture.source("second-project");
+    let missing = fixture.temp.path().join("missing").display().to_string();
+    let result = fixture
+        .store
+        .add_projects_to_workspace(
+            "default",
+            vec![
+                first.display().to_string(),
+                first.join(".").display().to_string(),
+                second.display().to_string(),
+                missing.clone(),
+                fixture.data.display().to_string(),
+            ],
+        )
+        .unwrap();
+    assert_eq!(result.added_project_ids.len(), 2);
+    assert_eq!(result.overview.projects.len(), 2);
+    assert_eq!(result.failures.len(), 2);
+    assert_eq!(result.failures[0].path, missing);
+    let result = fixture
+        .store
+        .add_projects_to_workspace(
+            "default",
+            vec![first.display().to_string(), second.display().to_string()],
+        )
+        .unwrap();
+    assert!(result.added_project_ids.is_empty());
+    assert_eq!(result.already_present, 2);
+    assert!(fixture
+        .store
+        .add_projects_to_workspace("missing-group", vec![fixture.home.display().to_string()])
+        .is_err());
+    assert_eq!(fixture.store.overview().unwrap().projects.len(), 2);
+}
+
+#[test]
+fn deleting_workspace_preserves_shared_projects_and_rehomes_orphans() {
+    let mut fixture = Fixture::new();
+    let project = fixture.source("orphan-project");
+    let shared = fixture.source("shared-project");
+    let groups = fixture.store.create_workspace("待删除分组").unwrap();
+    let group = groups
+        .workspaces
+        .iter()
+        .find(|w| w.name == "待删除分组")
+        .unwrap()
+        .id
+        .clone();
+    fixture
+        .store
+        .add_project(&shared.display().to_string())
+        .unwrap();
+    let result = fixture
+        .store
+        .add_projects_to_workspace(
+            &group,
+            vec![project.display().to_string(), shared.display().to_string()],
+        )
+        .unwrap();
+    let ids = result
+        .overview
+        .projects
+        .iter()
+        .map(|p| p.id.clone())
+        .collect::<Vec<_>>();
+    let overview = fixture.store.delete_workspace(&group).unwrap();
+    assert_eq!(overview.workspaces.len(), 1);
+    assert_eq!(overview.projects.len(), 2);
+    assert!(ids
+        .iter()
+        .all(|id| overview.workspaces[0].project_ids.contains(id)));
+    assert!(fixture.store.delete_workspace("default").is_err());
+    assert!(project.join("SKILL.md").exists());
+    assert!(shared.join("SKILL.md").exists());
+}
+
+#[test]
+fn workspace_names_and_membership_survive_restart() {
+    let mut fixture = Fixture::new();
+    let project = fixture.source("persistent-project");
+    for invalid in ["", "  ", "bad\nname"] {
+        assert!(fixture.store.create_workspace(invalid).is_err());
+    }
+    let overview = fixture.store.create_workspace("  Team  ").unwrap();
+    let id = overview
+        .workspaces
+        .iter()
+        .find(|w| w.name == "Team")
+        .unwrap()
+        .id
+        .clone();
+    assert!(fixture.store.create_workspace("team").is_err());
+    fixture
+        .store
+        .add_projects_to_workspace(&id, vec![project.display().to_string()])
+        .unwrap();
+    fixture.store.rename_workspace(&id, "公司项目").unwrap();
+    assert!(fixture.store.rename_workspace(&id, "默认工作区").is_err());
+    drop(fixture.store);
+    let mut store = Store::open(&fixture.data, &fixture.home).unwrap();
+    let overview = store.overview().unwrap();
+    let group = overview.workspaces.iter().find(|w| w.id == id).unwrap();
+    assert_eq!(group.name, "公司项目");
+    assert_eq!(group.project_ids, vec![overview.projects[0].id.clone()]);
+    assert!(overview
+        .workspaces
+        .iter()
+        .find(|w| w.id == "default")
+        .unwrap()
+        .project_ids
+        .is_empty());
+}
+
+#[test]
+fn version_one_database_gets_default_workspace_without_replacing_project_ids() {
+    let fixture = Fixture::new();
+    let project_path = fixture.source("legacy-project");
+    drop(fixture.store);
+    let connection = rusqlite::Connection::open(fixture.data.join("skilldock.sqlite3")).unwrap();
+    connection
+        .execute_batch(
+            "DROP TABLE workspace_projects; DROP TABLE workspaces; PRAGMA user_version=1;",
+        )
+        .unwrap();
+    let legacy = skilldock_core::Project {
+        id: "legacy-project-id".into(),
+        name: "legacy-project".into(),
+        path: project_path.display().to_string(),
+    };
+    connection
+        .execute(
+            "INSERT INTO projects(id,path,data) VALUES(?1,?2,?3)",
+            rusqlite::params![
+                legacy.id,
+                legacy.path,
+                serde_json::to_string(&legacy).unwrap()
+            ],
+        )
+        .unwrap();
+    drop(connection);
+    for _ in 0..2 {
+        let mut store = Store::open(&fixture.data, &fixture.home).unwrap();
+        let overview = store.overview().unwrap();
+        assert_eq!(overview.projects[0].id, legacy.id);
+        assert_eq!(overview.projects[0].path, legacy.path);
+        assert_eq!(overview.workspaces.len(), 1);
+        assert_eq!(overview.workspaces[0].project_ids, vec![legacy.id.clone()]);
+    }
+    assert!(project_path.join("SKILL.md").exists());
+}

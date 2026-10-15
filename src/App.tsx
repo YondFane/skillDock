@@ -1,237 +1,224 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Anchor, Blocks, FileText, FolderKanban, History, Settings2, Plus, Upload, Search, RefreshCw,
-  ArrowUpRight, ChevronRight, X, Layers2, FolderOpen, Check, LoaderCircle, TriangleAlert, CircleCheck,
-} from 'lucide-react';
-import { api, desktopAvailable } from './lib/api';
-import {
-  compatibilityLabel, errorMessage, formatDate,
-  type ChangePreview, type Compatibility, type CreateInput, type EditInput, type Kind,
-  type Operation, type Overview, type Page, type Resource, type ResourceDetail, type Settings,
-} from './lib/types';
-import { CreateModal } from './components/CreateModal';
-import { ImportModal } from './components/ImportModal';
-import { ReviewModal } from './components/ReviewModal';
-import { ResourceEditor } from './components/ResourceEditor';
-import { Modal } from './components/Modal';
-import { HistoryPage, ProjectsPage, SettingsPage } from './components/WorkspacePages';
-import { version } from '../package.json';
+import { useEffect, useRef, useState } from 'react';
+import { Anchor, Blocks, FileText, FolderOpen, Globe2, History, Layers2, Settings2, Search, Plus, Upload, RefreshCw, X, LoaderCircle, MoreHorizontal, ChevronDown, PanelLeft, PencilLine } from 'lucide-react';
 import { AppearanceProvider } from './lib/appearance';
+import { useWorkspace } from './lib/useWorkspace';
+import { locationLabel, creationDirty } from './lib/workspace';
+import { compatibilityLabel, errorMessage, formatDate, type Operation, type ProjectImportFailure } from './lib/types';
+import { api, chooseFolders } from './lib/api';
+import { ResourceEditor } from './components/ResourceEditor';
+import { CreatePanel } from './components/CreatePanel';
+import { ImportModal } from './components/ImportModal';
+import { Modal } from './components/Modal';
+import { ReviewModal } from './components/ReviewModal';
+import { HistoryPage, SettingsPage } from './components/WorkspacePages';
+import { version } from '../package.json';
 
-const navigation = [
-  { id: 'library' as Page, label: '资源库', icon: Layers2 },
-  { id: 'local' as Page, label: '本地配置', icon: Blocks },
-  { id: 'projects' as Page, label: '项目', icon: FolderKanban },
-  { id: 'history' as Page, label: '变更记录', icon: History },
-];
-
-export default function App() {
-  return <AppearanceProvider><Workspace /></AppearanceProvider>;
-}
+type Confirmation = { title: string; description: string; label: string; action: () => void | Promise<void> };
+export default function App() { return <AppearanceProvider><Workspace /></AppearanceProvider>; }
 
 function Workspace() {
-  const [page, setPage] = useState<Page>('library');
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [kind, setKind] = useState<'all' | Kind>('all');
-  const [tool, setTool] = useState<'all' | Compatibility>('all');
-  const [environment, setEnvironment] = useState('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<ResourceDetail | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
+  const ws = useWorkspace();
+  const [projectSearch, setProjectSearch] = useState('');
+  const [narrow, setNarrow] = useState(() => window.innerWidth <= 1100);
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => window.innerWidth > 1100);
+  const [workspaceForm, setWorkspaceForm] = useState<{ id?: string; name: string; error: string } | null>(null);
+  const [projectFailures, setProjectFailures] = useState<ProjectImportFailure[]>([]);
+  const [pickingProjects, setPickingProjects] = useState(false);
+  const closeSidebar = () => { if (narrow) setSidebarExpanded(false); };
+  useEffect(() => {
+    const query = window.matchMedia?.('(max-width: 1100px)');
+    if (!query) return;
+    const change = () => { setNarrow(query.matches); setSidebarExpanded(!query.matches); };
+    query.addEventListener('change', change);
+    return () => query.removeEventListener('change', change);
+  }, []);
+  useEffect(() => {
+    if (!narrow || !sidebarExpanded) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setSidebarExpanded(false); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [narrow, sidebarExpanded]);
+  const [draftsOpen, setDraftsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<ChangePreview | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [leaveAction, setLeaveAction] = useState<(() => void) | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmationError, setConfirmationError] = useState('');
+  useEffect(() => setConfirmationError(''), [confirmation]);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const detailRequest = useRef(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const blocked = ws.updateBusy || ws.exitBusy;
+  const busy = blocked || pickingProjects || ws.writes.length > 0;
+  const label = locationLabel(ws.location, ws.overview);
+  const project = ws.overview?.projects.find((item) => `project:${item.id}` === ws.location);
+  const selected = ws.resource;
+  const outsideFilter = selected && !ws.list.some((item) => item.id === selected.resource.id);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try { setOverview(await api.overview()); setError(null); }
-    catch (error) { setError(errorMessage(error)); }
-    finally { setLoading(false); }
+  useEffect(() => {
+    const closeMenus = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      document.querySelectorAll<HTMLDetailsElement>('details.action-menu[open]').forEach((menu) => {
+        if (!menu.contains(target) || (target instanceof Element && target.closest('button'))) menu.open = false;
+      });
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') document.querySelectorAll<HTMLDetailsElement>('details.action-menu[open]').forEach((menu) => { menu.open = false; });
+    };
+    document.addEventListener('click', closeMenus); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('click', closeMenus); document.removeEventListener('keydown', escape); };
   }, []);
 
   useEffect(() => {
-    if (!desktopAvailable) { setLoading(false); setError('请通过桌面版本使用本地文件功能。开发时运行 npm run tauri dev。'); return; }
-    void refresh();
-  }, [refresh]);
+    if (ws.page !== 'history') return;
+    let active = true; setHistoryLoading(true);
+    api.history().then((items) => { if (active) setOperations(items); }).catch((failure) => { if (active) ws.setError(errorMessage(failure)); }).finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, [ws.page, ws.overview]);
+  useEffect(() => { if (listRef.current) listRef.current.scrollTop = ws.view.scrollTop; }, [ws.location, ws.page, ws.loading]);
   useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 4500);
+    if (!ws.toast) return;
+    const timer = setTimeout(() => ws.setToast(null), ws.toast.resourceId ? 8000 : 4500);
     return () => clearTimeout(timer);
-  }, [toast]);
-  useEffect(() => {
-    if (page !== 'history') return;
-    setHistoryLoading(true);
-    api.history().then(setOperations).catch((error) => setError(errorMessage(error))).finally(() => setHistoryLoading(false));
-  }, [page, overview]);
-
-  const navigateSafely = (action: () => void) => {
-    if (dirty) setLeaveAction(() => action); else action();
+  }, [ws.toast]);
+  const confirm = async () => {
+    if (!confirmation || confirmBusy) return;
+    setConfirmBusy(true); setConfirmationError('');
+    try { await confirmation.action(); setConfirmation(null); }
+    catch (failure) { setConfirmationError(errorMessage(failure)); }
+    finally { setConfirmBusy(false); }
   };
-  const clearEditor = () => {
-    detailRequest.current += 1; setSelectedId(null); setDetail(null); setDirty(false); setLoadingDetail(false);
+  const askDiscard = (id: string, reload = false) => {
+    const dirty = ws.dirtyDrafts.some((draft) => draft.resource.id === id) || !!(ws.creations[id] && creationDirty(ws.creations[id]));
+    if (!dirty) { if (reload) void ws.reload(id); else ws.discard(id); return; }
+    setConfirmation({ title: reload ? '重新加载并放弃草稿？' : '放弃未保存修改？', description: '这只会丢弃当前资源的临时草稿，不会修改磁盘中的文件。', label: reload ? '放弃并重新加载' : '放弃修改', action: () => { ws.discard(id); } });
   };
-  const navigate = (destination: Page) => navigateSafely(() => {
-    clearEditor(); setPage(destination); setSearch(''); setKind('all'); setTool('all'); setEnvironment('all');
-  });
-  const loadDetail = async (id: string, relativePath?: string) => {
-    const request = ++detailRequest.current;
-    setSelectedId(id); setLoadingDetail(true);
+  const addProject = async () => {
+    const workspaceId = ws.workspaceId;
+    setPickingProjects(true);
     try {
-      const result = await api.detail(id, relativePath);
-      if (detailRequest.current === request) { setDetail(result); setDirty(false); setError(null); }
-    } catch (error) {
-      if (detailRequest.current === request) { setDetail(null); setError(errorMessage(error)); }
-    } finally { if (detailRequest.current === request) setLoadingDetail(false); }
+      const paths = await chooseFolders('添加项目（可多选目录）');
+      if (paths.length) {
+        const result = await ws.addProjects(paths, workspaceId);
+        if (result?.failures.length) setProjectFailures(result.failures);
+      }
+    } catch (failure) { ws.setError(errorMessage(failure)); }
+    finally { setPickingProjects(false); }
   };
-  const selectResource = (resource: Resource) => navigateSafely(() => { clearEditor(); void loadDetail(resource.id); });
-  const openCreate = () => navigateSafely(() => { setFormError(null); setCreateOpen(true); });
-  const prepare = async (request: () => Promise<ChangePreview>, form = false) => {
-    setBusy(true); setPreviewError(null); setFormError(null);
-    try { setPreview(await request()); }
-    catch (error) { if (form) setFormError(errorMessage(error)); else setError(errorMessage(error)); }
-    finally { setBusy(false); }
-  };
-  const submitCreate = (input: CreateInput) => { void prepare(() => api.create(input), true); };
-  const submitImport = (path: string, compatibility: Compatibility) => { void prepare(() => api.import(path, compatibility), true); };
-  const submitEdit = (input: EditInput) => { void prepare(() => api.edit(input)); };
-  const applyReview = async () => {
-    if (!preview) return;
-    setBusy(true); setPreviewError(null);
+  const saveWorkspace = async () => {
+    if (!workspaceForm) return;
     try {
-      const result = await api.apply(preview.id);
-      setPreview(null); setCreateOpen(false); setImportOpen(false); setDirty(false);
-      setToast(result.message);
-      const fresh = await api.overview();
-      setOverview(fresh); setError(null);
-      if (result.resourceId) {
-        const resource = fresh.resources.find((item) => item.id === result.resourceId);
-        if (resource) {
-          setPage(resource.origin === 'library' ? 'library' : 'local');
-          setSearch(''); setKind('all'); setTool('all'); setEnvironment('all');
-          const relative = result.resourceId === selectedId ? detail?.relativePath : undefined;
-          await loadDetail(result.resourceId, relative);
-        } else clearEditor();
-      } else clearEditor();
-    } catch (error) { setPreviewError(errorMessage(error)); }
-    finally { setBusy(false); }
+      const saved = await ws.manageWorkspace(workspaceForm.id ? 'rename' : 'create', workspaceForm.id ?? '', workspaceForm.name);
+      if (saved) { setWorkspaceForm(null); setProjectSearch(''); }
+    } catch (failure) { setWorkspaceForm({ ...workspaceForm, error: errorMessage(failure) }); }
   };
-  const changeProject = async (path: string) => {
-    setBusy(true);
-    try { setOverview(await api.addProject(path)); setToast('项目已登记，可查看它的本地配置。'); }
-    catch (error) { setError(errorMessage(error)); }
-    finally { setBusy(false); }
-  };
-  const removeProject = async (id: string) => {
-    setBusy(true);
-    try { setOverview(await api.removeProject(id)); setToast('已取消项目登记，项目文件已保留。'); }
-    catch (error) { setError(errorMessage(error)); }
-    finally { setBusy(false); }
-  };
-  const saveSettings = async (settings: Settings) => {
-    setBusy(true);
-    try { setOverview(await api.settings(settings)); setToast('目录已更新并重新扫描。'); setError(null); }
-    catch (error) { setError(errorMessage(error)); }
-    finally { setBusy(false); }
-  };
-
-  const all = overview?.resources ?? [];
-  const library = all.filter((resource) => resource.origin === 'library');
-  const local = all.filter((resource) => resource.origin === 'local');
-  const base = page === 'library' ? library : local;
-  const list = base.filter((resource) =>
-    (kind === 'all' || resource.kind === kind)
-    && (tool === 'all' || resource.compatibility === tool || resource.compatibility === 'both')
-    && (environment === 'all' || resource.environmentId === environment)
-    && [resource.name, resource.description, resource.path, resource.source].join(' ').toLowerCase().includes(search.toLowerCase()));
-  const isResourcePage = page === 'library' || page === 'local';
-  const selectedEnvironment = overview?.environments.find((item) => item.id === environment);
-  const newTarget = page === 'local' ? selectedEnvironment?.id ?? 'claude:global' : 'library';
-  const actionDisabled = busy || loading || !overview;
-
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><Anchor size={26} strokeWidth={1.8} /></div><div><strong>SkillDock<span>技能坞</span></strong><small>SKILLS & RULES</small></div></div>
-      <div className="workspace-label">工作空间</div>
-      <nav aria-label="主导航">{navigation.map((item) => <button key={item.id} className={'nav-item ' + (page === item.id ? 'active' : '')} onClick={() => navigate(item.id)} disabled={busy}>
-        <item.icon size={18} strokeWidth={1.8} /><span>{item.label}</span>
-        {item.id === 'library' && <small>{library.length}</small>}{item.id === 'local' && <small>{local.length}</small>}
-      </button>)}</nav>
-      <div className="sidebar-context"><span className="eyebrow">CONNECTED TOOLS</span><div><span className="tool-dot claude-dot" />Claude Code<span className="muted">本地配置</span></div><div><span className="tool-dot codex-dot" />Codex<span className="muted">本地配置</span></div></div>
-      <div className="sidebar-bottom"><button className={'nav-item ' + (page === 'settings' ? 'active' : '')} onClick={() => navigate('settings')} disabled={busy}><Settings2 size={18} /><span>设置</span></button><div className="local-status"><span className="status-dot" /><span>本地优先</span><small>v{version}</small></div></div>
-    </aside>
-    <main className="main-workspace">
-      <div className="topbar"><div className="breadcrumb">工作空间 <ChevronRight size={13} /><span>{page === 'settings' ? '设置' : navigation.find((item) => item.id === page)?.label}</span></div><div className="topbar-right"><span className="tiny-status">桌面应用</span><button className="icon-button" onClick={() => navigateSafely(() => { void refresh(); })} aria-label="重新扫描所有资源" disabled={busy || loading || !desktopAvailable}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button></div></div>
-      {error && <div className="app-error" role="alert"><TriangleAlert size={17} /><span>{error}</span><button className="icon-button" onClick={() => setError(null)} aria-label="关闭错误提示"><X size={15} /></button></div>}
-      {overview && overview.warnings.length > 0 && <details className="scan-warnings"><summary><TriangleAlert size={14} /> {overview.warnings.length} 项扫描提示</summary>{overview.warnings.map((warning, index) => <p key={index}>{warning}</p>)}</details>}
-      {isResourcePage && <>
-        <header className="page-heading"><div><span className="eyebrow">{page === 'library' ? 'YOUR KNOWLEDGE, ORGANIZED' : 'LOCAL TOOL CONFIGURATION'}</span><h1>{page === 'library' ? '资源库' : '本地配置'}<span className="heading-count">{base.length}</span></h1><p>{page === 'library' ? '把技能与工作约定整理到一起，为下一次工作做好准备。' : '管理 Claude Code 与 Codex 的全局和项目技能、行为规则。'}</p></div><div className="heading-actions">
-          {page === 'library' && <button className="button secondary" onClick={() => navigateSafely(() => { setFormError(null); setImportOpen(true); })} disabled={actionDisabled}><Upload size={16} /> 本地导入</button>}
-          <button className="button primary" onClick={openCreate} disabled={actionDisabled}><Plus size={17} /> 新建资源</button>
-        </div></header>
-        <section className="summary-row" aria-label="资源统计">
-          <div className="summary-card"><div className="summary-icon teal"><Blocks size={20} /></div><div><span>技能</span><strong>{base.filter((resource) => resource.kind === 'skill').length}<small>按需调用</small></strong></div></div>
-          <div className="summary-card"><div className="summary-icon violet"><FileText size={20} /></div><div><span>规则</span><strong>{base.filter((resource) => resource.kind === 'rule').length}<small>工作约定</small></strong></div></div>
-          <div className="summary-card"><div className="summary-icon warm"><FolderKanban size={20} /></div><div><span>项目</span><strong>{overview?.projects.length ?? 0}<small>独立配置</small></strong></div></div>
-          <div className="summary-note"><CircleCheck size={18} /><div><strong>所有资源，保存在本机</strong><span>修改前预览 · 写入前备份</span></div></div>
-        </section>
-        <div className={'resource-workspace ' + (selectedId ? 'with-editor' : '')}>
-          <section className="resource-list-panel">
-            <div className="list-toolbar"><div className="filter-tabs" role="tablist" aria-label="资源类型">
-              {(['all', 'skill', 'rule'] as const).map((value) => <button key={value} role="tab" aria-selected={kind === value} className={kind === value ? 'selected' : ''} onClick={() => setKind(value)}>{value === 'all' ? '全部' : value === 'skill' ? '技能' : '规则'}<span>{value === 'all' ? base.length : base.filter((resource) => resource.kind === value).length}</span></button>)}
-            </div><label className="search-input"><Search size={15} /><input aria-label="搜索资源" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索名称、内容说明…" /></label></div>
-            <div className="list-subtoolbar"><label className="compact-select"><span>工具</span><select aria-label="筛选工具" value={tool} onChange={(event) => setTool(event.target.value as typeof tool)}><option value="all">全部工具</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="both">通用资源</option></select></label>
-              {page === 'local' && <label className="compact-select"><span>位置</span><select aria-label="筛选配置环境" value={environment} onChange={(event) => setEnvironment(event.target.value)}><option value="all">全部位置</option>{overview?.environments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
-              <span className="result-count">{list.length} 项资源</span>
+  const projects = ws.workspaceProjects.filter((item) => [item.name, item.path].join(' ').toLowerCase().includes(projectSearch.toLowerCase()));
+  const projectItems = <>{projects.map((item) => <div className="project-nav-row" key={item.id}>
+    <button className={'nav-item ' + (ws.page === 'workspace' && ws.location === `project:${item.id}` ? 'active' : '')} title={item.path} disabled={blocked}
+      onClick={() => { ws.navigate(`project:${item.id}`); closeSidebar(); }}><FolderOpen size={16} /><span title={item.name}>{item.name}</span></button>
+    <details className="action-menu"><summary aria-label={'管理项目 ' + item.name}><MoreHorizontal size={16} /></summary><div><button disabled={busy} onClick={() => setConfirmation({ title: '从当前工作区移除项目？', description: item.name + '（' + item.path + '）的磁盘文件和其他工作区关联会保留。未保存草稿需先处理。', label: '从工作区移除', action: () => ws.removeProject(item.id, ws.workspaceId) })}>从工作区移除</button></div></details>
+  </div>)}</>;
+  return <div className={'app-shell streamlined ' + (sidebarExpanded ? 'sidebar-expanded' : 'sidebar-collapsed') + (narrow && sidebarExpanded ? ' sidebar-overlay' : '')}>
+    {narrow && sidebarExpanded && <button className="sidebar-backdrop" aria-label="收起侧栏遮罩" onClick={() => setSidebarExpanded(false)} />}
+    <div className="sidebar-slot"><aside className="sidebar">
+      <div className="brand"><button className="brand-mark" aria-label={sidebarExpanded ? "收起侧栏" : "展开侧栏"} title={sidebarExpanded ? "收起侧栏" : "展开侧栏"} aria-expanded={sidebarExpanded} aria-controls="sidebar-navigation" onClick={() => setSidebarExpanded(!sidebarExpanded)}><Anchor size={23} /></button><div className="brand-copy"><strong>SkillDock</strong><small>技能坞</small></div></div>
+      <nav id="sidebar-navigation" aria-label="主导航">
+        <button className="nav-item location-switcher" title="切换位置" aria-label="切换位置" disabled={blocked} onClick={() => setSidebarExpanded(true)}><PanelLeft size={18} /><span>选择位置</span></button>
+        <button className={'nav-item ' + (ws.page === 'workspace' && ws.location === 'global' ? 'active' : '')} title="全局配置" disabled={blocked} onClick={() => { ws.navigate('global'); closeSidebar(); }}><Globe2 size={18} /><span>全局配置</span></button>
+        <div className="workspace-navigation">
+          <div className="sidebar-section-label"><span>工作区</span><details className="action-menu"><summary aria-label="管理工作区"><MoreHorizontal size={16} /></summary><div>
+            <button disabled={busy} onClick={() => setWorkspaceForm({ name: '', error: '' })}>新建工作区</button>
+            <button disabled={busy || !ws.activeWorkspace} onClick={() => setWorkspaceForm({ id: ws.workspaceId, name: ws.activeWorkspace?.name ?? '', error: '' })}>重命名工作区</button>
+            <button disabled={busy || ws.workspaceId === 'default'} onClick={() => setConfirmation({ title: '删除工作区？', description: `删除“${ws.activeWorkspace?.name}”分组。项目文件不会删除，仅属于该工作区的项目会移入默认工作区。`, label: '删除工作区', action: async () => { await ws.manageWorkspace('delete', ws.workspaceId); } })}>删除工作区</button>
+          </div></details></div>
+          <select aria-label="切换工作区" title={ws.activeWorkspace?.name} value={ws.workspaceId} disabled={busy || !ws.overview} onChange={(event) => { ws.switchWorkspace(event.target.value); setProjectSearch(''); }}>
+            {ws.overview?.workspaces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        </div>
+        <div className="project-navigation"><div className="sidebar-section-label"><span>项目</span><button className="icon-button" aria-label="添加项目" disabled={busy} onClick={() => void addProject()}><Plus size={15} /></button></div>
+          <label className="project-search"><Search size={13} /><input aria-label="搜索项目" placeholder="搜索项目…" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} /></label>
+          <div className="project-nav-list">{projectItems}{projects.length === 0 && <p className="sidebar-empty">{projectSearch ? '未找到项目' : '添加项目即可管理配置'}</p>}</div>
+        </div>
+        <div className="sidebar-divider" />
+        <button className={'nav-item ' + (ws.page === 'workspace' && ws.location === 'library' ? 'active' : '')} title="资源库" disabled={blocked} onClick={() => { ws.navigate('library'); closeSidebar(); }}><Layers2 size={18} /><span>资源库</span></button>
+        <button className={'nav-item ' + (ws.page === 'history' ? 'active' : '')} title="变更记录" disabled={blocked} onClick={() => { ws.setPage('history'); closeSidebar(); }}><History size={18} /><span>变更记录</span></button>
+        <button className="nav-item" title={'草稿 ' + ws.dirtyCount} disabled={blocked} onClick={() => { closeSidebar(); setDraftsOpen(true); }}><PencilLine size={18} /><span>草稿</span><small>{ws.dirtyCount}</small></button>
+      </nav>
+      <div className="sidebar-bottom"><button className={'nav-item ' + (ws.page === 'settings' ? 'active' : '')} title="设置" disabled={blocked} onClick={() => { ws.setPage('settings'); closeSidebar(); }}><Settings2 size={18} /><span>设置</span></button><div className="local-status"><span className="status-dot" /><span>本地保存</span><small>v{version}</small></div></div>
+    </aside></div>
+    <main className="main-workspace" inert={narrow && sidebarExpanded}>
+      <div className="topbar"><div className="workspace-context"><strong>{ws.page === 'workspace' ? label : ws.page === 'history' ? '变更记录' : '设置'}</strong>{ws.page === 'workspace' && <span title={project?.path}>{project?.path ?? (ws.location === 'library' ? '收录与维护可复用的技能和规则' : 'Claude Code 与 Codex')}</span>}</div>
+        <div className="topbar-right"><button className="icon-button" aria-label="重新扫描所有资源" title="重新扫描" disabled={busy || ws.loading} onClick={() => void ws.refresh()}><RefreshCw size={16} className={ws.loading ? 'spin' : ''} /></button></div>
+      </div>
+      {ws.error && <div className="app-error" role="alert"><span>{ws.error}</span><button className="icon-button" onClick={() => ws.setError(null)} aria-label="关闭错误提示"><X size={15} /></button></div>}
+      {ws.preferenceError && <p className="compact-warning" role="status">{ws.preferenceError}</p>}
+      {!!ws.overview?.warnings.length && <details className="scan-warnings"><summary>{ws.overview.warnings.length} 项扫描提示</summary>{ws.overview.warnings.map((warning, index) => <p key={index}>{warning}</p>)}</details>}
+      {ws.page === 'workspace' && <>
+        <div className="workspace-actions"><div className="tool-segments" aria-label="工具筛选">{(['all', 'claude', 'codex'] as const).map((tool) => <button key={tool} aria-pressed={ws.view.tool === tool} className={ws.view.tool === tool ? 'selected' : ''} onClick={() => ws.patchView({ tool })}>{tool === 'all' ? '全部工具' : tool === 'claude' ? 'Claude' : 'Codex'}</button>)}</div>
+          <div className="workspace-primary-actions">{ws.location === 'library' && <button className="button secondary small" disabled={busy || !ws.overview} onClick={() => { setImportError(null); setImportOpen(true); }}><Upload size={14} /> 本地收录</button>}
+            <details className="action-menu new-menu"><summary className="button primary small" aria-label="新建资源"><Plus size={15} /> 新建 <ChevronDown size={13} /></summary><div>
+              <button disabled={blocked || !ws.overview} onClick={(event) => { ws.newResource('skill'); event.currentTarget.closest('details')?.removeAttribute('open'); }}><Blocks size={15} /> 新建技能</button>
+              <button disabled={blocked || !ws.overview} onClick={(event) => { ws.newResource('rule'); event.currentTarget.closest('details')?.removeAttribute('open'); }}><FileText size={15} /> 新建规则</button>
+            </div></details>
+          </div>
+        </div>
+        <div className={'resource-workspace ' + (ws.selectedId ? 'with-editor' : '')}>
+          <section className="resource-list-panel" aria-label="资源列表">
+            <div className="list-toolbar"><label className="search-input"><Search size={15} /><input aria-label="搜索资源" placeholder="搜索技能、规则…" value={ws.view.search} onChange={(event) => ws.patchView({ search: event.target.value })} /></label>
+              <div className="filter-tabs" role="tablist" aria-label="资源类型">{(['all', 'skill', 'rule'] as const).map((kind) => <button key={kind} role="tab" aria-selected={ws.view.kind === kind} className={ws.view.kind === kind ? 'selected' : ''} onClick={() => ws.patchView({ kind })}>{kind === 'all' ? '全部' : kind === 'skill' ? '技能' : '规则'}</button>)}</div><span className="result-count">{ws.list.length} 项</span>
             </div>
-            {loading ? <div className="empty-state"><LoaderCircle size={23} className="spin" /><p>正在发现本地资源…</p></div>
-              : list.length === 0 ? <div className="empty-state">
-                <div className="empty-icon"><Layers2 size={30} /></div><span className="eyebrow">{base.length ? 'NO MATCHES' : 'A CLEAN START'}</span>
-                <h3>{base.length ? '没有找到匹配的资源' : page === 'library' ? '让好用的工作方式，随时就绪' : '还没有发现本地配置'}</h3>
-                <p>{base.length ? '试试其他关键词，或调整筛选条件。' : page === 'library' ? '创建你的第一个技能或规则，也可以从已有目录导入。' : '可以创建全局配置、添加项目，或在设置中指定目录。'}</p>
-                {!base.length && <button className="button secondary" onClick={openCreate} disabled={actionDisabled}><Plus size={16} /> 创建第一个资源</button>}
-              </div>
-              : <div className="resource-list">{list.map((resource) => <button key={resource.id} className={'resource-row ' + (selectedId === resource.id ? 'selected' : '')} onClick={() => selectResource(resource)} disabled={busy}>
-                <div className={'resource-type-icon ' + (resource.kind === 'rule' ? 'rule-icon' : '')}>{resource.kind === 'skill' ? <Blocks size={21} strokeWidth={1.7} /> : <FileText size={21} strokeWidth={1.7} />}</div>
-                <div className="resource-row-body"><div className="resource-row-heading"><strong>{resource.name}</strong>{resource.readOnly && <span className="badge badge-neutral">只读</span>}{resource.warnings.length > 0 && <TriangleAlert size={13} className="resource-warning-icon" />}</div>
-                  <p>{resource.description || '尚未填写说明，打开资源查看内容。'}</p>
-                  <div className="resource-row-meta"><span className={'kind-tag ' + (resource.kind === 'rule' ? 'kind-rule' : '')}>{resource.kind === 'skill' ? 'SKILL' : 'RULE'}</span><span>{compatibilityLabel[resource.compatibility]}</span><i />
-                    <span>{page === 'local' ? overview?.environments.find((item) => item.id === resource.environmentId)?.name : resource.source.startsWith('本地导入') ? '本地导入' : '新建'}</span>
-                  </div>
-                </div><div className="resource-row-end"><span>{formatDate(resource.updatedAt)}</span><ArrowUpRight size={15} /></div>
-              </button>)}</div>}
-            <footer className="list-footer"><span>{page === 'library' ? '技能与规则，集中维护' : '写入后请在目标工具确认加载'}</span><span>UTF-8</span></footer>
+            <div className="resource-list" ref={listRef} onScroll={(event) => ws.patchView({ scrollTop: event.currentTarget.scrollTop })}>
+              {ws.loading && !ws.overview ? <div className="empty-state"><LoaderCircle className="spin" size={23} /><p>正在扫描配置…</p></div>
+                : ws.list.length === 0 ? <div className="empty-state"><Layers2 size={27} /><h3>{ws.base.length ? '没有匹配的资源' : '这里还没有技能或规则'}</h3><p>{ws.base.length ? '调整搜索或筛选条件。' : '点击上方“新建”，直接在当前位置创建。'}</p></div>
+                  : ws.list.map((resource) => <button key={resource.id} className={'resource-row ' + (ws.selectedId === resource.id ? 'selected' : '')} onClick={() => ws.selectResource(resource.id)}>
+                    <div className="resource-type-icon">{resource.kind === 'skill' ? <Blocks size={18} /> : <FileText size={18} />}</div>
+                    <div className="resource-row-body"><div className="resource-row-heading"><strong>{resource.name}</strong>{ws.dirtyDrafts.some((draft) => draft.resource.id === resource.id) && <span className="draft-dot" title="未保存">●</span>}</div><p>{resource.description || '暂无说明'}</p>
+                      <div className="resource-row-meta"><span>{resource.tool ? compatibilityLabel[resource.tool] : compatibilityLabel[resource.compatibility]}</span>{resource.readOnly && <span>只读</span>}<span>{formatDate(resource.updatedAt)}</span></div>
+                    </div></button>)}
+            </div>
+            <footer className="list-footer"><span>{ws.dirtyDrafts.filter((draft) => draft.location === ws.location).length} 个资源待保存</span><span>本机文件</span></footer>
           </section>
-          {selectedId && <ResourceEditor detail={detail} busy={busy} loading={loadingDetail} onDirty={setDirty} onSave={submitEdit}
-            onDelete={() => { if (detail) void prepare(() => api.delete(detail.resource.id, detail.fingerprint)); }}
-            onFile={(path) => navigateSafely(() => { void loadDetail(selectedId, path); })}
-            onReload={() => navigateSafely(() => { void loadDetail(selectedId, detail?.relativePath); })}
-            onClose={() => navigateSafely(clearEditor)}
-            onAdopt={() => { if (detail) void prepare(() => api.adopt(detail.resource.id)); }} onMessage={setToast} />}
+          {ws.creation ? <CreatePanel key={ws.creation.id} draft={ws.creation} environments={ws.overview?.environments ?? []} location={label} busy={blocked || ws.writes.includes(ws.creation.id)} onChange={ws.updateCreation}
+            onCreate={() => void ws.createResource(ws.creation!.id)} onClose={() => ws.patchView({ selectedId: null })} onDiscard={() => askDiscard(ws.creation!.id)} onOpenExisting={ws.jumpTo} />
+            : selected ? <div className="viewer-column">{outsideFilter && <div className="outside-filter" role="status">当前资源不在筛选结果中，仍可继续编辑。<button onClick={() => ws.patchView({ search: '', tool: 'all', kind: 'all' })}>清除筛选</button></div>}
+              <ResourceEditor key={selected.resource.id} draft={selected} disabled={blocked} loading={ws.loadingFiles.includes(selected.resource.id)} location={locationLabel(selected.location, ws.overview)} onChange={ws.updateDraft} onSave={() => void ws.saveResource(selected.resource.id)}
+                onDelete={() => void ws.prepareDelete(selected.resource.id)} onFile={(relativePath) => ws.patchView({ relativePath })} onReload={() => askDiscard(selected.resource.id, true)} onDiscard={() => askDiscard(selected.resource.id)} onClose={() => ws.patchView({ selectedId: null })}
+                onAdopt={() => void ws.immediate('adopt:' + selected.resource.id, () => api.adopt(selected.resource.id)).catch((failure) => ws.setError(errorMessage(failure)))} onMessage={(message) => ws.setToast({ message })} positions={ws.positions} />
+            </div> : ws.selectedId && <aside className="resource-editor"><div className="editor-loading"><LoaderCircle size={23} className="spin" /><span>正在读取资源…</span><button className="button secondary" onClick={() => ws.patchView({ selectedId: null })}>关闭</button></div></aside>}
         </div>
       </>}
-      {page === 'projects' && <ProjectsPage projects={overview?.projects ?? []} busy={busy} onAdd={(path) => void changeProject(path)} onRemove={(id) => void removeProject(id)} onError={setError} onOpen={(id) => { clearEditor(); setPage('local'); setEnvironment('claude:project:' + id); setTool('all'); setSearch(''); setKind('all'); }} />}
-      {page === 'history' && <HistoryPage operations={operations} loading={historyLoading} busy={busy} onRestore={(id) => void prepare(() => api.restore(id))} />}
-      {page === 'settings' && overview && <SettingsPage settings={overview.settings} dataDir={overview.dataDir} busy={busy} onSave={(settings) => void saveSettings(settings)} onError={setError} onUpdateBusyChange={setBusy} />}
-      <footer className="workspace-footer"><Anchor size={12} /> SkillDock · 给技能一个停靠的地方<span><FolderOpen size={12} /> macOS / Windows</span></footer>
+      {ws.page === 'history' && <HistoryPage operations={operations} loading={historyLoading} busy={busy} onRestore={(id) => void ws.prepareRestore(id)} />}
+      {ws.page === 'settings' && ws.overview && <SettingsPage settings={ws.overview.settings} draft={ws.settingsDraft ?? ws.overview.settings} dataDir={ws.overview.dataDir} busy={busy} hasDrafts={ws.dirtyCount > 0} hasResourceDrafts={ws.dirtyDrafts.length + ws.dirtyCreations.length > 0}
+        onDraftChange={(value) => ws.setSettingsDraft(JSON.stringify(value) === JSON.stringify(ws.overview!.settings) ? null : value)} onSave={() => void ws.saveSettings()} onError={ws.setError} onUpdateBusyChange={ws.setUpdateBusy} />}
     </main>
-    {toast && <div className="toast" role="status"><Check size={17} /><span>{toast}</span><button className="icon-button" onClick={() => setToast(null)} aria-label="关闭通知"><X size={14} /></button></div>}
-    {createOpen && <CreateModal environments={overview?.environments ?? []} initialTarget={newTarget} initialKind={kind === 'rule' ? 'rule' : 'skill'} busy={busy} error={formError} onSubmit={submitCreate} onClose={() => setCreateOpen(false)} />}
-    {importOpen && <ImportModal busy={busy} error={formError} onSubmit={submitImport} onClose={() => setImportOpen(false)} />}
-    {preview && <ReviewModal preview={preview} busy={busy} error={previewError} onApply={() => void applyReview()} onClose={() => { setPreview(null); setPreviewError(null); }} />}
-    {leaveAction && <Modal title="当前修改尚未保存" subtitle="离开后，编辑器中的修改会被放弃。" onClose={() => setLeaveAction(null)}>
-      <footer className="modal-footer"><button className="button secondary" onClick={() => setLeaveAction(null)}>继续编辑</button><button className="button danger" onClick={() => { const action = leaveAction; setLeaveAction(null); setDirty(false); action(); }}>放弃修改并继续</button></footer>
-    </Modal>}
+    {ws.toast && <div className="toast" role="status"><span>{ws.toast.message}</span>{ws.toast.resourceId && <button className="button small secondary" onClick={() => { ws.jumpTo(ws.toast!.resourceId!); ws.setToast(null); }}>查看资源</button>}<button className="icon-button" aria-label="关闭消息" onClick={() => ws.setToast(null)}><X size={14} /></button></div>}
+    {importOpen && <ImportModal busy={ws.writes.includes('import')} error={importError} onClose={() => setImportOpen(false)} onSubmit={(path, compatibility) => {
+      setImportError(null); void ws.immediate('import', () => api.import(path, compatibility)).then((ok) => { if (ok) setImportOpen(false); }).catch((failure) => setImportError(errorMessage(failure)));
+    }} />}
+    {ws.preview && (ws.preview.action === 'delete' ? <Modal title="删除这个资源？" onClose={() => ws.setPreview(null)} busy={ws.writes.includes('review')}>
+      <div className="modal-body"><strong>{ws.preview.name}</strong><code className="data-path">{ws.preview.targetPath}</code><p>将删除 {ws.preview.totalFiles} 个文件。删除前保存完整备份，可从变更记录恢复。</p>{ws.previewError && <p className="inline-error" role="alert">{ws.previewError}</p>}</div>
+      <footer className="modal-footer"><button className="button secondary" disabled={ws.writes.includes('review')} onClick={() => ws.setPreview(null)}>取消</button><button className="button danger" disabled={ws.writes.includes('review') || !!ws.previewError} onClick={() => void ws.applyReview()}>确认删除</button></footer>
+    </Modal> : <ReviewModal preview={ws.preview} busy={ws.writes.includes('review')} error={ws.previewError} onClose={() => ws.setPreview(null)} onApply={() => void ws.applyReview()} />)}
+    {confirmation && <Modal title={confirmation.title} onClose={() => setConfirmation(null)} busy={confirmBusy}><div className="modal-body"><p>{confirmation.description}</p>{confirmationError && <p className="inline-error" role="alert">{confirmationError}</p>}</div><footer className="modal-footer"><button className="button secondary" disabled={confirmBusy} onClick={() => setConfirmation(null)}>取消</button><button className="button danger" disabled={confirmBusy} onClick={() => void confirm()}>{confirmation.label}</button></footer></Modal>}
+    {draftsOpen && <Modal title={'未保存草稿 · ' + ws.dirtyCount} onClose={() => setDraftsOpen(false)}><div className="modal-body draft-picker">
+      {ws.dirtyCount === 0 && <p className="muted">当前没有未保存修改。</p>}
+      {ws.dirtyDrafts.map((draft) => <button key={draft.resource.id} className="draft-picker-row" onClick={() => { ws.jumpTo(draft.resource.id); setDraftsOpen(false); }}><strong>{draft.resource.name}</strong><span>{locationLabel(draft.location, ws.overview)} · {compatibilityLabel[draft.compatibility]}</span></button>)}
+      {ws.dirtyCreations.map((draft) => <button key={draft.id} className="draft-picker-row" onClick={() => { ws.jumpTo(draft.id); setDraftsOpen(false); }}><strong>{draft.name || '未命名资源'} · 新建</strong><span>{locationLabel(draft.location, ws.overview)}</span></button>)}
+      {ws.settingsDraft && <button className="draft-picker-row" onClick={() => { ws.setPage('settings'); setDraftsOpen(false); }}>工具目录设置</button>}
+    </div><footer className="modal-footer"><button className="button primary" disabled={busy || !ws.dirtyCount} onClick={() => { setDraftsOpen(false); void ws.saveAll(); }}>保存全部</button></footer></Modal>}
+    {workspaceForm && <Modal title={workspaceForm.id ? '重命名工作区' : '新建工作区'} onClose={() => setWorkspaceForm(null)} busy={busy}>
+      <form onSubmit={(event) => { event.preventDefault(); void saveWorkspace(); }}>
+        <div className="modal-body"><label className="form-label">工作区名称<input autoFocus aria-label="工作区名称" maxLength={80} value={workspaceForm.name} disabled={busy} placeholder="例如：个人项目、公司项目" onChange={(event) => setWorkspaceForm({ ...workspaceForm, name: event.target.value, error: '' })} /></label>
+          <p className="muted">按自定义分组管理项目；同一项目可加入多个工作区。</p>{workspaceForm.error && <p className="inline-error" role="alert">{workspaceForm.error}</p>}</div>
+        <footer className="modal-footer"><button type="button" className="button secondary" disabled={busy} onClick={() => setWorkspaceForm(null)}>取消</button><button className="button primary" disabled={busy || !workspaceForm.name.trim()}>{busy ? '保存中…' : '保存工作区'}</button></footer>
+      </form></Modal>}
+    {projectFailures.length > 0 && <Modal title="部分项目未能添加" onClose={() => setProjectFailures([])}><div className="modal-body"><p>有效项目已添加，以下目录需要处理后重试：</p>{projectFailures.map((failure, index) => <div key={index}><code className="data-path">{failure.path}</code><p className="inline-error">{failure.message}</p></div>)}</div><footer className="modal-footer"><button className="button primary" onClick={() => setProjectFailures([])}>知道了</button></footer></Modal>}
+    {ws.exitOpen && <Modal title="退出前处理未保存修改" subtitle="草稿仅在本次会话保留，退出后会丢失。" onClose={() => ws.setExitOpen(false)} busy={ws.exitBusy}>
+      <div className="modal-body"><p>还有 {ws.dirtyCount} 项未保存修改。保存失败时会保留应用和草稿。</p></div><footer className="modal-footer">
+        <button className="button secondary" disabled={ws.exitBusy} onClick={() => ws.setExitOpen(false)}>取消</button>
+        <button className="button secondary" disabled={ws.exitBusy} onClick={() => void ws.finishExit(false)}>放弃并退出</button>
+        <button className="button primary" disabled={ws.exitBusy} onClick={() => void ws.finishExit(true)}>{ws.exitBusy ? '保存中…' : '保存全部并退出'}</button>
+      </footer></Modal>}
   </div>;
 }

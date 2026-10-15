@@ -19,7 +19,7 @@ export function ImportModal({ busy, error, onSubmit, onClose }: {
       if (selected) setPath(selected);
     } catch (error) { setPickerError(errorMessage(error)); }
   };
-  return <Modal title="从本地导入" subtitle="完整保留资源文件；导入和校验过程不会执行脚本。" onClose={onClose} busy={busy}>
+  return <Modal title="收录本地资源" subtitle="完整复制到资源库，不修改原文件，不执行脚本。" onClose={onClose} busy={busy}>
     <div className="modal-body">
       <div className="kind-picker">
         <button className={kind === 'skill' ? 'selected' : ''} onClick={() => { setKind('skill'); setPath(''); }} disabled={busy}><FolderOpen size={21} /><span><strong>技能目录</strong><small>SKILL.md 与全部附属文件</small></span></button>
@@ -38,7 +38,7 @@ export function ImportModal({ busy, error, onSubmit, onClose }: {
     </div>
     <footer className="modal-footer"><button className="button secondary" onClick={onClose} disabled={busy}>取消</button>
       <button className="button primary" onClick={() => onSubmit(path, compatibility)} disabled={busy || !path.trim()}>
-        {busy ? <LoaderCircle size={16} className="spin" /> : <ArrowRight size={16} />} 预览导入
+        {busy ? <LoaderCircle size={16} className="spin" /> : <ArrowRight size={16} />} 收录到资源库
       </button>
     </footer>
   </Modal>;

@@ -8,8 +8,8 @@ import { errorMessage } from '../lib/types';
 
 type Phase = 'idle' | 'checking' | 'available' | 'current' | 'downloading' | 'installing' | 'installed' | 'error';
 
-export function UpdatePanel({ disabled, onBusyChange }: {
-  disabled: boolean; onBusyChange: (busy: boolean) => void;
+export function UpdatePanel({ disabled, installationBlocked = false, onBusyChange }: {
+  disabled: boolean; installationBlocked?: boolean; onBusyChange: (busy: boolean) => void;
 }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [update, setUpdate] = useState<Update | null>(null);
@@ -50,7 +50,7 @@ export function UpdatePanel({ disabled, onBusyChange }: {
   };
 
   const installUpdate = async () => {
-    if (!update || disabled || inFlight.current) return;
+    if (!update || disabled || installationBlocked || inFlight.current) return;
     inFlight.current = true; onBusyChange(true);
     setPhase('downloading'); setMessage('正在下载更新…'); setProgress(null);
     let downloaded = 0;
@@ -88,10 +88,13 @@ export function UpdatePanel({ disabled, onBusyChange }: {
       <button className="button secondary" disabled={!desktopAvailable || disabled || phase === 'checking' || updating || phase === 'installed'} onClick={() => void checkForUpdate()}>
         {phase === 'checking' ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={15} />} 检查更新
       </button>
-      {update && phase !== 'installed' && <button className="button primary" disabled={disabled || updating || phase === 'checking'} onClick={() => void installUpdate()}>
+      {update && phase !== 'installed' && <button className="button primary" disabled={disabled || installationBlocked || updating || phase === 'checking'} onClick={() => void installUpdate()}>
         {updating ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />} {updating ? '正在更新…' : '下载并安装'}
       </button>}
-      {phase === 'installed' && <button className="button primary" onClick={() => void relaunch().catch((error) => setMessage(`请手动重新启动应用。${errorMessage(error)}`))}>重新启动</button>}
+      {phase === 'installed' && <button className="button primary" disabled={disabled || installationBlocked} onClick={() => {
+        if (disabled || installationBlocked) return;
+        void relaunch().catch((error) => setMessage(`请手动重新启动应用。${errorMessage(error)}`));
+      }}>重新启动</button>}
     </footer>
   </section>;
 }

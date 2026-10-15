@@ -4,7 +4,7 @@ import { yaml } from '@codemirror/lang-yaml';
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useAppearance } from '../lib/appearance';
 
 const editorStyles = {
@@ -28,14 +28,33 @@ const highlighting = syntaxHighlighting(HighlightStyle.define([
 const markdownExtensions = [markdown(), EditorView.lineWrapping, highlighting];
 const yamlExtensions = [yaml(), EditorView.lineWrapping, highlighting];
 
-export function Editor({ value, onChange, readOnly, filename = '', label = '资源内容' }: {
+export interface EditorPosition { anchor: number; head: number; scrollTop: number }
+
+export function Editor({ value, onChange, readOnly, filename = '', label = '资源内容', position, onPosition }: {
   value: string; onChange: (value: string) => void; readOnly?: boolean; filename?: string; label?: string;
+  position?: EditorPosition; onPosition?: (position: EditorPosition) => void;
 }) {
   const { appearance } = useAppearance();
   const theme = useMemo(() => EditorView.theme(editorStyles, { dark: appearance.theme === 'dark' }), [appearance]);
+  const positionCallback = useRef(onPosition); positionCallback.current = onPosition;
+  const scrollExtension = useMemo(() => EditorView.domEventHandlers({ scroll: (_event, view) => {
+    const { anchor, head } = view.state.selection.main;
+    positionCallback.current?.({ anchor, head, scrollTop: view.scrollDOM.scrollTop });
+  } }), []);
   return <div className="code-editor" data-testid="resource-content" role="group" aria-label={label}>
     <CodeMirror value={value} height="100%" theme={theme}
-      extensions={/\.ya?ml$/i.test(filename) ? yamlExtensions : markdownExtensions}
+      extensions={[...(/\.ya?ml$/i.test(filename) ? yamlExtensions : markdownExtensions), scrollExtension]}
+      onCreateEditor={(view) => {
+        if (!position) return;
+        view.dispatch({ selection: { anchor: Math.min(position.anchor, view.state.doc.length), head: Math.min(position.head, view.state.doc.length) } });
+        view.scrollDOM.scrollTop = position.scrollTop;
+      }}
+      onUpdate={(update) => {
+        if (update.selectionSet) {
+          const { anchor, head } = update.state.selection.main;
+          positionCallback.current?.({ anchor, head, scrollTop: update.view.scrollDOM.scrollTop });
+        }
+      }}
       editable={!readOnly} readOnly={readOnly}
       basicSetup={{ lineNumbers: true, highlightActiveLine: true, foldGutter: true, autocompletion: false }}
       onChange={onChange} />

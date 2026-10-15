@@ -101,3 +101,24 @@ describe('application updates', () => {
     await waitFor(() => expect(update.close).toHaveBeenCalledOnce());
   });
 });
+
+it('allows checking updates with drafts but blocks installation until drafts are saved', async () => {
+  const update = makeUpdate(); service.check.mockResolvedValue(update);
+  const view = render(<UpdatePanel disabled={false} installationBlocked={true} onBusyChange={vi.fn()} />);
+  expect(screen.getByRole('button', { name: '检查更新' })).toBeEnabled();
+  await userEvent.click(screen.getByRole('button', { name: '检查更新' }));
+  expect(await screen.findByRole('button', { name: '下载并安装' })).toBeDisabled(); expect(update.download).not.toHaveBeenCalled();
+  view.rerender(<UpdatePanel disabled={false} installationBlocked={false} onBusyChange={vi.fn()} />);
+  expect(screen.getByRole('button', { name: '下载并安装' })).toBeEnabled();
+});
+
+it('also protects retrying a restart if new drafts exist after installation', async () => {
+  const update = makeUpdate(); service.check.mockResolvedValue(update);
+  service.relaunch.mockRejectedValue(new Error('restart unavailable'));
+  const view = render(<UpdatePanel disabled={false} onBusyChange={vi.fn()} />);
+  await userEvent.click(screen.getByRole('button', { name: '检查更新' }));
+  await userEvent.click(await screen.findByRole('button', { name: '下载并安装' }));
+  await screen.findByRole('button', { name: '重新启动' });
+  view.rerender(<UpdatePanel disabled={false} installationBlocked={true} onBusyChange={vi.fn()} />);
+  expect(screen.getByRole('button', { name: '重新启动' })).toBeDisabled(); expect(service.relaunch).toHaveBeenCalledTimes(1);
+});
